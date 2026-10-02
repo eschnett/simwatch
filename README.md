@@ -148,4 +148,4 @@ cargo run --example fake_sims -- /tmp/simwatch-demo &   # keeps updating a few f
 cargo run -- /tmp/simwatch-demo
 ```
 
-[IDEAS.md](IDEAS.md) collects ideas for later.
+[IDEAS.md](IDEAS.md) collects ideas for later; [CODE.md](CODE.md) describes the code internals.
