@@ -1,0 +1,26 @@
+[package]
+name = "simwatch"
+version = "0.1.0"
+edition = "2024"
+authors = ["Erik Schnetter <schnetter@gmail.com>"]
+description = "A TUI to watch HPC simulation progress"
+license = "MIT"
+rust-version = "1.86"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+dirs = "6"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ratatui = "0.30"
+ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
