@@ -56,9 +56,9 @@ simwatch /mnt/beegfs/$USER/runs ~/runs
 | `n` `p` | Next / previous simulation in the detail view |
 | `[` `]` | Previous / next image |
 | `Tab`, `1` `2` `3` | List, cards, detail view |
-| `s` | Change the sort order (newest, name, state, last update) |
+| `s` | Change the sort order (newest, name, state, last update, group) |
 | `f` | Hide or show finished and failed simulations |
-| `/` | Filter by name (`Enter` keeps the filter, `Esc` clears it) |
+| `/` | Filter by name, directory or group (`Enter` keeps the filter, `Esc` clears it) |
 | `r` | Re-read the status files now |
 | `R` | Scan the directories for new simulations now |
 | `Ctrl-L` | Repaint the screen |
@@ -84,6 +84,24 @@ ago each one last finished.
 
 A `!` after the state in the list (e.g. `running!`) means that the latest
 version of the status file could not be read, and the previous one is shown.
+
+A simulation that has been resubmitted is judged by the job it is waiting
+for. The Job column then shows that job (e.g. `1234602 PD #4`: the
+simulation's fourth job, pending).
+
+### What the views show
+
+- **List:** one line per simulation. A *Group* column appears when some
+  simulation has a `group`, and a *Summary* column with its headline values
+  when some simulation names them in `summary`; an arrow (↑ ↓ →) shows
+  their trend when the simulation records a `[history]`. On narrow
+  terminals the less important columns (resources, wall time, speed, …)
+  are left out.
+- **Cards:** a few lines per simulation, with the summary values and their
+  recent history as sparklines.
+- **Detail:** everything, including a *History* section with a sparkline
+  and the exponential growth rate of each recorded series, the earlier
+  Slurm jobs of the simulation, and its images.
 
 ## Configuration
 
@@ -127,7 +145,7 @@ SimWatch is meant to run for days on a shared login node:
   so a hanging file system cannot freeze the display or pile up threads.
 - **One `squeue` call.** Slurm is asked with a single `squeue --user=$USER`
   call at most every two minutes, and that call is killed after a timeout.
-- **Size limits.** Status files over 64 KiB are not read. Images over 1 MiB
+- **Size limits.** Status files over 128 KiB are not read. Images over 1 MiB
   or 1024×1024 pixels are not read, and images are loaded only for the
   simulation shown in the detail view.
 
@@ -139,7 +157,8 @@ SimWatch is meant to run for days on a shared login node:
 - [writers/julia/SimWatchStatus.jl](writers/julia/SimWatchStatus.jl): a
   drop-in Julia writer that depends only on the standard library.
 - [writers/simwatch.sh](writers/simwatch.sh): shell helpers to mark a job as
-  queued right after `sbatch`, or as failed when it exits with an error.
+  queued right after `sbatch` (also for resubmissions, keeping the previous
+  job's diagnostics), or as failed when it exits with an error.
 
 ## Trying it out
 

@@ -109,7 +109,7 @@ fn write_bbh(dir: &Path, t: f64) {
     let (r, phase) = orbit(t);
     let pos1 = [0.5 * r * phase.cos(), 0.5 * r * phase.sin(), 0.0];
     let pos2 = [-pos1[0], -pos1[1], 0.0];
-    let ham = 1e-6 * (1.0 + 0.5 * (t / 7.0).sin()) * (t / 60.0).exp();
+    let ham = ham_l2(t);
     let started = (t * 30.0) as i64;
 
     let mut st = table(&[
@@ -198,15 +198,35 @@ fn write_bbh(dir: &Path, t: f64) {
         "separation".into(),
         Value::Table(table(&[("value", f(r)), ("unit", s("M"))])),
     );
+    st.insert("group".into(), s("bbh-study"));
+    st.insert(
+        "summary".into(),
+        Value::Array(vec![s("constraints.ham_l2"), s("separation")]),
+    );
+    // The last 40 chunks, as a simulation's writer would have recorded them
+    let times: Vec<f64> = (0..40).map(|k| t - 1.5 * (39 - k) as f64).filter(|t| *t >= 0.0).collect();
+    st.insert(
+        "history".into(),
+        Value::Table(table(&[
+            ("time", arr(&times)),
+            ("constraints.ham_l2", arr(&times.iter().map(|t| ham_l2(*t)).collect::<Vec<_>>())),
+            ("separation", arr(&times.iter().map(|t| orbit(*t).0).collect::<Vec<_>>())),
+        ])),
+    );
     write_status(dir, &st);
 
     write_png(&dir.join("plots/track.png"), &track_plot(t));
     write_png(&dir.join("plots/constraints.png"), &constraint_plot(t));
 }
 
+fn ham_l2(t: f64) -> f64 {
+    1e-6 * (1.0 + 0.5 * (t / 7.0).sin()) * (t / 60.0).exp()
+}
+
 fn write_worker(dir: &Path, w: i64, t: f64) {
     let mut st = table(&[
         ("name", s(&format!("calibration worker {w}"))),
+        ("group", s("calibration")),
         ("status", s("running")),
         ("updated", now_minus(0)),
         ("update_interval", i(5)),
@@ -312,9 +332,31 @@ fn write_static(root: &Path) {
     );
     st.insert(
         "slurm".into(),
-        Value::Table(table(&[("job_id", s("1234400")), ("next_job_id", s("1234602"))])),
+        Value::Table(table(&[
+            ("job_id", s("1234400")),
+            ("next_job_id", s("1234602")),
+            ("previous_job_ids", Value::Array(vec![s("1233001"), s("1233950")])),
+        ])),
     );
     write_status(&root.join("bbh-q1-d14"), &st);
+
+    // Progress by frames rather than simulation time
+    let mut st = table(&[
+        ("name", s("kh-showcase")),
+        ("status", s("running")),
+        ("updated", now_minus(30)),
+        ("update_interval", i(120)),
+        ("message", s("frame 123 of 600: zooming in")),
+    ]);
+    st.insert(
+        "progress".into(),
+        Value::Table(table(&[("fraction", f(123.0 / 600.0)), ("walltime", f(5.0 * 3600.0))])),
+    );
+    st.insert(
+        "resources".into(),
+        Value::Table(table(&[("gpus", i(1)), ("threads", i(16))])),
+    );
+    write_status(&root.join("kh-showcase"), &st);
 
     // Opportunistic: no name, no status, just a couple of numbers
     write_atomic(
@@ -427,7 +469,7 @@ fn constraint_plot(t: f64) -> RgbImage {
     let mut prev = None;
     for k in 0..=n {
         let tk = T_END * k as f64 / (x1 - x0);
-        let v = 1e-6 * (1.0 + 0.5 * (tk / 7.0).sin()) * (tk / 60.0).exp();
+        let v = ham_l2(tk);
         let y = y0 + (v.log10() - lmin) / (lmax - lmin) * (y1 - y0);
         let p = (x0 + k as f64, y.clamp(y1, y0));
         if let Some(q) = prev {

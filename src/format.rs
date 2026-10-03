@@ -15,13 +15,22 @@ use toml::{Table, Value};
 pub const STATUS_FILE: &str = "simwatch.toml";
 
 /// Status files larger than this are not read.
-pub const MAX_STATUS_BYTES: u64 = 64 * 1024;
+pub const MAX_STATUS_BYTES: u64 = 128 * 1024;
 
 /// At most this many images per simulation are considered.
 pub const MAX_IMAGES: usize = 10;
 
 /// At most this many problem-specific entries are kept per simulation.
 pub const MAX_EXTRA: usize = 1000;
+
+/// At most this many headline values are shown
+pub const MAX_SUMMARY: usize = 6;
+
+/// History series are cut to their last this many points
+pub const MAX_HISTORY_POINTS: usize = 200;
+
+/// At most this many history series are kept
+pub const MAX_HISTORY_SERIES: usize = 32;
 
 /// The parsed contents of a status file. Everything is optional.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -36,13 +45,44 @@ pub struct Status {
     pub code: Option<String>,
     pub host: Option<String>,
     pub pid: Option<i64>,
+    /// Simulations with the same group belong together, e.g. a parameter study
+    pub group: Option<String>,
+    /// Keys (as in `values`) of the headline values
+    pub summary: Vec<SummaryKey>,
     pub progress: Progress,
     pub resources: Resources,
     pub slurm: SlurmInfo,
     pub black_holes: Vec<BlackHole>,
     pub images: Vec<ImageRef>,
+    pub history: History,
     /// Problem-specific (or not understood) entries, flattened to dotted keys
     pub extra: Vec<Entry>,
+    /// The whole document flattened to dotted keys, for looking up `summary`
+    pub values: Vec<Entry>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SummaryKey {
+    pub key: String,
+    pub label: Option<String>,
+}
+
+/// A short window of recent values, written by the simulation
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct History {
+    /// The x axis; without it, points are equally spaced
+    pub time: Option<Vec<f64>>,
+    /// Named series, in key order
+    pub series: Vec<(String, Vec<f64>)>,
+}
+
+impl History {
+    pub fn get(&self, key: &str) -> Option<&[f64]> {
+        self.series
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_slice())
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -53,6 +93,8 @@ pub struct Progress {
     pub time_start: Option<f64>,
     pub time_end: Option<f64>,
     pub time_unit: Option<String>,
+    /// Fraction done (0 to 1), for runs whose progress is not simulation time
+    pub fraction: Option<f64>,
     /// Wall-clock seconds since the current job started
     pub walltime: Option<f64>,
     pub walltime_limit: Option<f64>,
@@ -78,7 +120,10 @@ pub struct SlurmInfo {
     pub job_id: Option<String>,
     pub job_name: Option<String>,
     pub partition: Option<String>,
+    /// Submitted, but has not written yet
     pub next_job_id: Option<String>,
+    /// Earlier jobs of this simulation, oldest first
+    pub previous_job_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -132,7 +177,15 @@ pub fn parse_status(text: &str) -> Result<Status, String> {
 }
 
 fn status_from_table(t: &mut Table) -> Status {
+    let (history, history_rest) = take_history(t);
+    let summary = take_summary(t);
+    let mut values = Vec::new();
+    flatten("", &Value::Table(t.clone()), &mut values);
     let mut st = Status {
+        group: take_string(t, "group"),
+        summary,
+        history,
+        values,
         name: take_string(t, "name"),
         status: take_string(t, "status"),
         updated: take_time(t, "updated"),
@@ -152,6 +205,7 @@ fn status_from_table(t: &mut Table) -> Status {
             time_start: take_number(&mut p, "time_start"),
             time_end: take_number(&mut p, "time_end"),
             time_unit: take_string(&mut p, "time_unit"),
+            fraction: take_number(&mut p, "fraction"),
             walltime: take_number(&mut p, "walltime"),
             walltime_limit: take_number(&mut p, "walltime_limit"),
             speed: take_number(&mut p, "speed"),
@@ -180,6 +234,10 @@ fn status_from_table(t: &mut Table) -> Status {
             job_name: take_string(&mut s, "job_name"),
             partition: take_string(&mut s, "partition"),
             next_job_id: take_id(&mut s, "next_job_id"),
+            previous_job_ids: take_if(&mut s, "previous_job_ids", |v| {
+                v.as_array()?.iter().map(as_id).collect()
+            })
+            .unwrap_or_default(),
         };
         put_back(t, "slurm", s);
     }
@@ -218,7 +276,60 @@ fn status_from_table(t: &mut Table) -> Status {
     }
 
     flatten("", &Value::Table(std::mem::take(t)), &mut st.extra);
+    st.extra.extend(history_rest);
     st
+}
+
+/// The `[history]` table: arrays of numbers become series, anything else is
+/// returned as generic entries
+fn take_history(t: &mut Table) -> (History, Vec<Entry>) {
+    let mut h = History::default();
+    let Some(v @ Value::Table(_)) = t.remove("history") else {
+        return (h, Vec::new());
+    };
+    let mut flat = Vec::new();
+    flatten("history", &v, &mut flat);
+    let mut rest = Vec::new();
+    for e in flat {
+        let nums: Option<Vec<f64>> = match &e.value {
+            Value::Array(a) if !a.is_empty() => a.iter().map(as_number).collect(),
+            _ => None,
+        };
+        let key = e.key.strip_prefix("history.").unwrap_or(&e.key).to_string();
+        match nums {
+            Some(mut v) => {
+                v.drain(..v.len().saturating_sub(MAX_HISTORY_POINTS));
+                if key == "time" || key == "t" {
+                    h.time = Some(v);
+                } else if h.series.len() < MAX_HISTORY_SERIES {
+                    h.series.push((key, v));
+                }
+            }
+            None => rest.push(e),
+        }
+    }
+    (h, rest)
+}
+
+/// `summary = ["a.b", { key = "c", label = "C" }]`
+fn take_summary(t: &mut Table) -> Vec<SummaryKey> {
+    let parse = |v: &Value| match v {
+        Value::String(s) => Some(SummaryKey {
+            key: s.clone(),
+            label: None,
+        }),
+        Value::Table(t) => Some(SummaryKey {
+            key: t.get("key")?.as_str()?.to_string(),
+            label: t.get("label").and_then(Value::as_str).map(String::from),
+        }),
+        _ => None,
+    };
+    take_if(t, "summary", |v| {
+        let mut keys: Vec<SummaryKey> = v.as_array()?.iter().map(parse).collect::<Option<_>>()?;
+        keys.truncate(MAX_SUMMARY);
+        Some(keys)
+    })
+    .unwrap_or_default()
 }
 
 fn image_ref(v: &Value) -> Option<ImageRef> {
@@ -332,11 +443,15 @@ fn take_bool(t: &mut Table, key: &str) -> Option<bool> {
 
 /// Job ids may be written as integers or strings
 fn take_id(t: &mut Table, key: &str) -> Option<String> {
-    take_if(t, key, |v| match v {
+    take_if(t, key, as_id)
+}
+
+fn as_id(v: &Value) -> Option<String> {
+    match v {
         Value::String(s) => Some(s.trim().to_string()),
         Value::Integer(i) => Some(i.to_string()),
         _ => None,
-    })
+    }
 }
 
 fn take_vector(t: &mut Table, key: &str) -> Option<Vec<f64>> {
@@ -465,6 +580,76 @@ coeffs = [1, 2, 3]
         assert_eq!(area.unit.as_deref(), Some("M^2"));
         assert_eq!(area.label.as_deref(), Some("Horizon area"));
         assert_eq!(as_number(&area.value), Some(50.2));
+    }
+
+    #[test]
+    fn group_summary_history() {
+        let st = parse_status(
+            r#"
+group = "octant-study"
+summary = ["shells.r2.ham_l2", { key = "progress.iteration", label = "it" }]
+
+[progress]
+iteration = 7
+fraction = 0.25
+
+[shells.r2]
+ham_l2 = 1.5e-6
+
+[slurm]
+job_id = 300
+previous_job_ids = [100, "200"]
+
+[history]
+time = [1, 2, 3]
+"plain" = [1.0, 2.0, nan]
+note = "not a series"
+words = ["a", "b"]
+
+[history.shells.r2]
+ham_l2 = [1e-6, 2e-6, 4e-6]
+"#,
+        )
+        .unwrap();
+        assert_eq!(st.group.as_deref(), Some("octant-study"));
+        assert_eq!(st.summary.len(), 2);
+        assert_eq!(st.summary[0].key, "shells.r2.ham_l2");
+        assert_eq!(st.summary[1].label.as_deref(), Some("it"));
+        assert_eq!(st.progress.fraction, Some(0.25));
+        assert_eq!(st.slurm.previous_job_ids, ["100", "200"]);
+        assert_eq!(st.history.time, Some(vec![1.0, 2.0, 3.0]));
+        assert_eq!(st.history.get("shells.r2.ham_l2"), Some(&[1e-6, 2e-6, 4e-6][..]));
+        assert!(st.history.get("plain").unwrap()[2].is_nan());
+        assert!(st.history.get("note").is_none());
+
+        // Everything is in `values`, including well-known keys, but not history or summary
+        let value = |k: &str| st.values.iter().find(|e| e.key == k).map(|e| &e.value);
+        assert_eq!(value("progress.iteration").and_then(as_number), Some(7.0));
+        assert_eq!(value("shells.r2.ham_l2").and_then(as_number), Some(1.5e-6));
+        assert!(st.values.iter().all(|e| !e.key.starts_with("history") && e.key != "summary"));
+
+        // What is not a series stays visible
+        let keys: Vec<&str> = st.extra.iter().map(|e| e.key.as_str()).collect();
+        assert!(keys.contains(&"history.note"));
+        assert!(keys.contains(&"history.words"));
+        assert!(!keys.contains(&"group"));
+    }
+
+    #[test]
+    fn history_limits_and_bad_summary() {
+        let long: Vec<String> = (0..300).map(|i| i.to_string()).collect();
+        let st = parse_status(&format!(
+            "summary = [1, 2]\n[history]\nt = [{0}]\ny = [{0}]",
+            long.join(", ")
+        ))
+        .unwrap();
+        let t = st.history.time.unwrap();
+        assert_eq!(t.len(), MAX_HISTORY_POINTS);
+        assert_eq!(t[0], 100.0);
+        assert_eq!(st.history.series[0].1.len(), MAX_HISTORY_POINTS);
+        // A summary that is not understood is shown generically
+        assert!(st.summary.is_empty());
+        assert!(st.extra.iter().any(|e| e.key == "summary"));
     }
 
     #[test]

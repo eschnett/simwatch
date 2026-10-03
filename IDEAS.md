@@ -19,11 +19,12 @@ each cell can show two colours:
 
 ## Plotting data instead of images
 
-Instead of PNGs, a simulation could post small data series (e.g. a CSV with
-time, x, y of each black hole, or the constraint norm over time). SimWatch
-would then draw the plot itself, with Braille characters (like
-UnicodePlots.jl), at whatever size fits the terminal. This is sharper than a
-scaled-down image and needs no graphics protocol.
+The `[history]` table already carries short time series, shown as one-line
+sparklines. SimWatch could also draw them as proper plots, with axes and
+several series, using Braille characters (like UnicodePlots.jl) at whatever
+size fits the terminal. A black hole track could come the same way, as
+`x` and `y` series. This is sharper than a scaled-down image and needs no
+graphics protocol.
 
 ## Other graphics protocols
 
@@ -72,9 +73,7 @@ would be called only for jobs that just disappeared.
 
 ## Small things
 
-- Show a sparkline of recent speed or constraint norms. This needs history,
-  which SimWatch deliberately does not keep, so it would have to come from
-  the simulation.
 - Mouse support: click to select, scroll wheel.
 - Open the run directory or the log file in `$PAGER`.
-- Group simulations by root directory or by campaign.
+- Show group headers in the list, or collapse a group to one line.
+- Group simulations by root directory when they have no `group`.

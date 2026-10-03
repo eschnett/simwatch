@@ -7,7 +7,8 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph};
 
-use super::{App, fmt, health_style, list};
+use super::list::{self, Col};
+use super::{App, fmt, health_style};
 use crate::format::BlackHole;
 use crate::model::{Health, Sim};
 use crate::slurm::Snapshot;
@@ -45,7 +46,7 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
 fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>, selected: bool) {
     let st = sim.st();
     let now = Utc::now();
-    let c = list::cells(sim, h, now, snap);
+    let c = |col: Col| list::cell(col, sim, h, now, snap);
     let hs = health_style(h);
     let border = if selected {
         hs.bold()
@@ -63,7 +64,8 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
             Span::styled(format!(" {} ", h.glyph()), hs),
             Span::raw(sim.display_name()).bold(),
             Span::raw(" "),
-            Span::styled(format!("{} ", c[2]), hs),
+            Span::styled(format!("{} ", c(Col::State)), hs),
+            Span::raw(st.group.as_deref().map(|g| format!("· {g} ")).unwrap_or_default()).dim(),
         ]))
         .title_top(Line::from(format!(" {} ", sim.dir.display())).dim().right_aligned());
 
@@ -78,12 +80,12 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
             progress.push(Span::raw(value.to_string()));
         }
     };
-    add("it", &c[3]);
-    add("t", &c[4]);
-    add("", &c[5]);
-    add("speed", &c[6]);
-    add("ETA", &c[7]);
-    add("wall", &c[8]);
+    add("it", &c(Col::Iter));
+    add("t", &c(Col::Time));
+    add("", &c(Col::Pct));
+    add("speed", &c(Col::Speed));
+    add("ETA", &c(Col::Eta));
+    add("wall", &c(Col::Wall));
     let updated = sim.age(now).map(|a| format!("{} ago", fmt::age(a)));
     add("updated", updated.as_deref().unwrap_or(""));
 
@@ -94,9 +96,10 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
     };
 
     let mut jobline: Vec<Span> = Vec::new();
-    if !c[10].is_empty() {
+    let job = c(Col::Job);
+    if !job.is_empty() {
         jobline.push(dim("job "));
-        jobline.push(Span::raw(c[10].clone()));
+        jobline.push(Span::raw(job));
         if let Some(j) = sim.job(snap) {
             jobline.push(dim(&format!("  {} {}", j.partition, j.reason)));
         }
@@ -140,16 +143,35 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
                 .join("   "),
         ))
     };
-    let extras: Vec<String> = st
-        .extra
-        .iter()
-        .take(12)
-        .map(|e| {
-            let unit = e.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
-            format!("{}={}{unit}", e.key, fmt::value(&e.value))
-        })
-        .collect();
-    let extra_line = Line::from(dim(&extras.join("  ")));
+    let summary = sim.summary();
+    let extra_line = if summary.is_empty() {
+        let extras: Vec<String> = st
+            .extra
+            .iter()
+            .take(12)
+            .map(|e| {
+                let unit = e.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+                format!("{}={}{unit}", e.key, fmt::value(&e.value))
+            })
+            .collect();
+        Line::from(dim(&extras.join("  ")))
+    } else {
+        // Headline values, with a sparkline of their recent history
+        let mut spans = Vec::new();
+        for it in &summary {
+            if !spans.is_empty() {
+                spans.push(dim("   "));
+            }
+            let unit = it.value.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+            spans.push(dim(&format!("{} ", it.label)));
+            spans.push(Span::raw(format!("{}{unit}", fmt::value(&it.value.value))));
+            if let Some(h) = it.history {
+                let line = fmt::sparkline(h, 12, fmt::wants_log(h));
+                spans.push(Span::styled(format!(" {line}"), Style::new().fg(Color::Cyan)));
+            }
+        }
+        Line::from(spans)
+    };
 
     let mut lines = vec![Line::from(progress), message, Line::from(jobline)];
     match bh_line {

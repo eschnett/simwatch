@@ -135,6 +135,48 @@ pub fn value(v: &Value) -> String {
     }
 }
 
+/// Whether a series is best drawn on a log scale: all positive, spanning more
+/// than two decades
+pub fn wants_log(values: &[f64]) -> bool {
+    let finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    let (min, max) = finite
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(*v), b.max(*v)));
+    !finite.is_empty() && min > 0.0 && max / min > 100.0
+}
+
+/// A sparkline of at most `width` cells; non-finite points are blank
+pub fn sparkline(values: &[f64], width: usize, log: bool) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let n = values.len();
+    if n == 0 || width == 0 {
+        return String::new();
+    }
+    let f = |v: f64| if log { v.ln() } else { v };
+    let pick: Vec<f64> = if n <= width {
+        values.iter().map(|v| f(*v)).collect()
+    } else {
+        (0..width)
+            .map(|i| f(values[(i * (n - 1) + (width - 1) / 2) / (width - 1).max(1)]))
+            .collect()
+    };
+    let (min, max) = pick
+        .iter()
+        .filter(|v| v.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(*v), b.max(*v)));
+    pick.iter()
+        .map(|v| {
+            if !v.is_finite() {
+                ' '
+            } else if max > min {
+                BARS[(((v - min) / (max - min)) * 7.0).round() as usize]
+            } else {
+                BARS[3]
+            }
+        })
+        .collect()
+}
+
 /// Truncate to at most `n` characters, marking the cut with an ellipsis
 pub fn trunc(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
@@ -187,5 +229,21 @@ mod tests {
         assert_eq!(trunc("abcdef", 4), "abc…");
         assert_eq!(trunc("abc", 4), "abc");
         assert_eq!(vector(&[1.0, 0.0, 0.5]), "(1, 0, 0.5)");
+    }
+
+    #[test]
+    fn sparklines() {
+        assert_eq!(sparkline(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], 8, false), "▁▂▃▄▅▆▇█");
+        assert_eq!(sparkline(&[1.0, f64::NAN, 1.0], 8, false), "▄ ▄");
+        assert_eq!(sparkline(&[], 8, false), "");
+        let exp: Vec<f64> = (0..100).map(|i| 10f64.powi(i / 10)).collect();
+        assert!(wants_log(&exp));
+        assert!(!wants_log(&[1.0, 2.0]));
+        assert!(!wants_log(&[-1.0, 1000.0]));
+        let s = sparkline(&exp, 10, true);
+        assert_eq!(s.chars().count(), 10);
+        assert!(s.starts_with('▁') && s.ends_with('█'));
+        // On a log scale, an exponential climbs evenly
+        assert_eq!(sparkline(&[1.0, 10.0, 100.0, 1000.0], 4, true), "▁▃▆█");
     }
 }

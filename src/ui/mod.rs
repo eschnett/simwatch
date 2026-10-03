@@ -46,6 +46,7 @@ pub enum Sort {
     Name,
     Health,
     Updated,
+    Group,
 }
 
 impl Sort {
@@ -54,7 +55,8 @@ impl Sort {
             Sort::Newest => Sort::Name,
             Sort::Name => Sort::Health,
             Sort::Health => Sort::Updated,
-            Sort::Updated => Sort::Newest,
+            Sort::Updated => Sort::Group,
+            Sort::Group => Sort::Newest,
         }
     }
     fn label(self) -> &'static str {
@@ -63,6 +65,7 @@ impl Sort {
             Sort::Name => "name",
             Sort::Health => "state",
             Sort::Updated => "updated",
+            Sort::Group => "group",
         }
     }
 }
@@ -220,17 +223,24 @@ impl App {
                     let s = &self.sims[*i];
                     s.display_name().to_lowercase().contains(&filter)
                         || s.dir.to_string_lossy().to_lowercase().contains(&filter)
+                        || s.st().group.as_ref().is_some_and(|g| g.to_lowercase().contains(&filter))
                 }
             })
             .collect();
         let sims = &self.sims;
         let name = |i: usize| sims[i].display_name().to_lowercase();
+        let newest = |a: usize, b: usize| {
+            sims[b]
+                .sort_time()
+                .cmp(&sims[a].sort_time())
+                .then_with(|| name(a).cmp(&name(b)))
+        };
         match self.sort {
-            Sort::Newest => v.sort_by(|a, b| {
-                sims[b.0]
-                    .sort_time()
-                    .cmp(&sims[a.0].sort_time())
-                    .then_with(|| name(a.0).cmp(&name(b.0)))
+            Sort::Newest => v.sort_by(|a, b| newest(a.0, b.0)),
+            // Simulations without a group come last
+            Sort::Group => v.sort_by(|a, b| {
+                let g = |i: usize| (sims[i].st().group.is_none(), sims[i].st().group.clone());
+                g(a.0).cmp(&g(b.0)).then_with(|| newest(a.0, b.0))
             }),
             Sort::Name => v.sort_by_key(|a| name(a.0)),
             Sort::Health => v.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| name(a.0).cmp(&name(b.0)))),
@@ -793,6 +803,59 @@ title = "Tracks"
 
         app.help = true;
         assert!(render(&mut app).contains("scan for new simulations now"));
+    }
+
+    #[test]
+    fn group_summary_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = app(tmp.path(), None);
+        // Without groups or summaries there are no such columns
+        let list = render(&mut app);
+        assert!(!list.contains("Group") && !list.contains("Summary"), "{list}");
+
+        app.sims.push(sim(
+            &tmp.path().join("c"),
+            r#"name = "row-3"
+group = "octant"
+summary = ["shells.r2.ham_l2"]
+[shells.r2]
+ham_l2 = 4e-6
+[slurm]
+job_id = 30
+previous_job_ids = [10, 20]
+[history]
+time = [1, 2, 3, 4]
+"shells.r2.ham_l2" = [1e-6, 2e-6, 3e-6, 4e-6]
+"#,
+        ));
+        let list = render(&mut app);
+        assert!(list.contains("Group") && list.contains("Summary"), "{list}");
+        assert!(list.contains("octant"));
+        assert!(list.contains("ham_l2 4e-6↑"), "{list}");
+        assert!(list.contains("30 #3"), "{list}");
+
+        app.view = View::Cards;
+        let cards = render(&mut app);
+        assert!(cards.contains("· octant"), "{cards}");
+        assert!(cards.contains("ham_l2 4e-6 ▁"), "{cards}");
+
+        app.view = View::List;
+        app.selected = Some(tmp.path().join("c"));
+        app.set_view(View::List, true);
+        let detail = render(&mut app);
+        assert!(detail.contains("Summary"), "{detail}");
+        assert!(detail.contains("History"));
+        assert!(detail.contains("rate +"), "{detail}");
+        assert!(detail.contains("Earlier jobs    10, 20"), "{detail}");
+        assert!(detail.contains("this is job 3"));
+
+        // The group sorts and filters
+        app.set_view(View::List, false);
+        app.sort = Sort::Group;
+        let vis = app.visible();
+        assert_eq!(app.sims[vis[0].0].st().group.as_deref(), Some("octant"));
+        app.filter = "octa".into();
+        assert_eq!(app.visible().len(), 1);
     }
 
     #[test]

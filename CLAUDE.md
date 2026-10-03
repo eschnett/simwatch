@@ -4,7 +4,10 @@ SimWatch is a Rust terminal UI that watches HPC simulations. Each simulation
 writes a `simwatch.toml` status file; SimWatch finds and displays these
 files, checks them against `squeue`, and shows small images as sixel
 graphics. The first user is TreeGeneralizedHarmonic (a Julia code) on the
-Symmetry cluster at Perimeter Institute.
+Symmetry cluster at Perimeter Institute; TreeWave and TreeHydro (in
+`~/src/jl/`) are the next candidates. Check format and writer changes
+against all three: thin observer hooks, frame loops, MPI ranks, `Float32`
+values, resubmitted jobs.
 
 ## Documents
 
@@ -26,6 +29,7 @@ cargo clippy --all-targets          # must be warning-free
 cargo run -- --print DIR            # one-shot plain-text list, no TTY needed
 cargo run --example fake_sims -- DIR [--once]   # demo simulations in every state
 cargo run -- DIR                    # interactive (needs a real terminal)
+julia writers/julia/runtests.jl     # tests of the Julia writer
 ```
 
 `sed` on this machine is GNU sed: use `sed -i 's/…/…/'`, not `sed -i ''`.
@@ -50,8 +54,12 @@ cargo run -- DIR                    # interactive (needs a real terminal)
 ## When changing things
 
 - A change to the status file format touches, together: `src/format.rs`
-  (and its tests), the UI that displays it, `FORMAT.md`,
-  `writers/julia/SimWatchStatus.jl`, and `examples/fake_sims.rs`.
+  (and its tests), the UI that displays it, `FORMAT.md` (including its
+  instructions for AI agents), `writers/julia/SimWatchStatus.jl` and its
+  `runtests.jl`, `writers/simwatch.sh` if it concerns `status` or
+  `[slurm]`, and `examples/fake_sims.rs`.
+- The Julia writer is copied into simulation codes (TreeGeneralizedHarmonic
+  has one). Keep its public names and keywords stable; add, don't rename.
 - A new configuration key goes into `FileConfig` and `Config` in
   `src/config.rs` and into the example in README.md. `FileConfig` rejects
   unknown keys, so the README example must stay valid.

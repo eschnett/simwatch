@@ -37,7 +37,7 @@ a hanging file system or Slurm cannot pile up threads.
 | `src/slurm.rs` | Run and parse `squeue`; `Snapshot` with job lookup |
 | `src/images.rs` | Image size limits and the image loader thread |
 | `src/ui/mod.rs` | `App` state, key handling, header and status bar, the event loop `run` |
-| `src/ui/list.rs` | List view; `cells()` computes the column texts, shared with `--print` (`text()`) |
+| `src/ui/list.rs` | List view: the `Col` enum, `columns()` (which columns to show), `cell()` (one cell's text), shared with the cards and `--print` (`text()`) |
 | `src/ui/cards.rs` | Card view |
 | `src/ui/detail.rs` | Detail view: all keys on the left, the current image on the right |
 | `src/ui/help.rs` | Help overlay |
@@ -54,6 +54,13 @@ stays in the table. Partly consumed sub-tables (`[progress]`,
 left. Whatever remains is flattened into `Status::extra` as dotted keys
 (`constraints.ham_l2`, `black_holes[1].color`).
 
+Before anything is taken out, `[history]` and `summary` are removed and the
+rest of the document is flattened once more into `Status::values`. That is
+where `summary` keys are looked up, so they can name well-known keys too
+(`progress.iteration`). `take_history` keeps arrays of numbers as series
+(the dotted names of nested tables, `time` or `t` as the x axis) and returns
+everything else as generic entries, which end up in `extra` as `history.…`.
+
 Other details:
 - Annotated values `{ value = …, unit = …, label = … }` are recognized by
   `is_annotated`. Typed helpers unwrap them (`plain`). `flatten` keeps the
@@ -62,8 +69,9 @@ Other details:
   seconds. A datetime without an offset is read in local time. The Julia
   writer writes strings ending in `Z`, because Julia's TOML writer cannot
   write offsets.
-- Limits: 64 KiB per file (`read_status_file` reads at most one byte more
-  than that), 10 images, 1000 extra entries.
+- Limits: 128 KiB per file (`read_status_file` reads at most one byte more
+  than that), 10 images, 1000 extra entries, 6 summary keys, 32 history
+  series of at most 200 points (the last ones are kept).
 
 ## Simulations and health (`model.rs`)
 
@@ -77,13 +85,24 @@ Derived values:
 - `last_update` is `updated` if present, else the file mtime.
 - `speed` is the reported `speed` if present. Otherwise it is the average
   `(time - time_start) / walltime` per hour, and is flagged as derived.
-- `fraction` and `eta` are computed from `time`, `time_end` and the speed.
+- `fraction` is `progress.fraction` if given, else `time / time_end`.
+- `eta` uses the remaining simulation time and the speed when there is no
+  `progress.fraction`, else the wall time so far scaled by the fraction left.
+  It returns whether it comes from an average, shown as `~`.
+- `summary()` resolves the `summary` keys in `values`, with their labels and
+  any history series of the same name.
+- `shown_job()` is the job the list shows: `next_job_id` while waiting for
+  it, else `job_id`, with its number among the simulation's jobs.
+- `growth_rate` (least-squares slope of ln y against t) and `trend` are free
+  functions over history series.
 
 `health()` combines three inputs:
 1. the reported `status`, normalized to lowercase, with synonyms;
 2. freshness: age ≤ max(`stale_factor` × `update_interval`, `stale_floor`);
-3. the Slurm job, if both `slurm.job_id` and a snapshot exist. A job that
-   is missing from a successful snapshot means *lost*.
+3. the Slurm job, if both a job id and a snapshot exist. A job that is
+   missing from a successful snapshot means *lost*. For a `queued`,
+   `stopped` or `failed` simulation with a `next_job_id`, that job is
+   checked instead of `job_id`: the simulation is waiting for it.
 
 The order of the `Health` enum variants is the sort order for "sort by
 state" (most urgent first). Keep that in mind when adding variants.
@@ -205,6 +224,11 @@ These cost time to find; keep them in mind.
 - rendering of every view into ratatui's `TestBackend`;
 - an end-to-end sixel test: load a PNG through the loader thread, render
   the detail view, and find `ESC P` in the buffer.
+
+`writers/julia/runtests.jl` tests the Julia writer: the document, the rate
+limit and `update_interval`, that it never throws (unwritable directories),
+the history window, the Slurm environment and MPI ranks, and the job
+lineage across `SLURM_JOB_ID`s. Run it with `julia writers/julia/runtests.jl`.
 
 The demo generator `examples/fake_sims.rs` writes simulations in every
 state, including a broken file, a file with only a couple of keys, nested

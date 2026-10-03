@@ -10,7 +10,7 @@ use ratatui_image::{Resize, StatefulImage};
 
 use super::{App, ImageState, cards, fmt, health_style};
 use crate::format::{STATUS_FILE, Status};
-use crate::model::Sim;
+use crate::model::{Sim, growth_rate};
 use crate::slurm::Snapshot;
 
 const KEY_WIDTH: usize = 15;
@@ -131,6 +131,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     if let Some(m) = &st.message {
         kv(&mut out, "Message", m.clone());
     }
+    if let Some(g) = &st.group {
+        kv(&mut out, "Group", g.clone());
+    }
     if let Some(c) = &st.code {
         kv(&mut out, "Code", c.clone());
     }
@@ -153,6 +156,30 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
         kv(&mut out, "Updated", format!("{}  ({ago} ago{every})", fmt::local_time(t)));
     }
 
+    let summary = sim.summary();
+    if !summary.is_empty() {
+        section(&mut out, "Summary");
+        for it in &summary {
+            let mut spans = vec![
+                Span::raw(format!("{:<KEY_WIDTH$} ", fmt::trunc(&it.label, KEY_WIDTH))).dim(),
+                Span::raw(fmt::value(&it.value.value)).bold(),
+            ];
+            if let Some(u) = &it.value.unit {
+                spans.push(Span::raw(format!(" {u}")));
+            }
+            if let Some(h) = it.history {
+                spans.push(Span::styled(
+                    format!("  {}", fmt::sparkline(h, 16, fmt::wants_log(h))),
+                    Style::new().fg(Color::Cyan),
+                ));
+            }
+            if it.label != it.value.key {
+                spans.push(Span::raw(format!("  ({})", it.value.key)).dim());
+            }
+            out.push(Line::from(spans));
+        }
+    }
+
     let unit = p.time_unit.clone().unwrap_or_default();
     let mut prog = Vec::new();
     if let Some(i) = p.iteration {
@@ -167,14 +194,17 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             s.push_str(&format!("  ({:.1}%)", 100.0 * x));
         }
         prog.push(("Time", s));
+    } else if let Some(x) = sim.fraction() {
+        prog.push(("Done", format!("{:.1}%", 100.0 * x)));
     }
     if let Some((s, avg)) = sim.speed() {
         let u = p.speed_unit.clone().unwrap_or_else(|| format!("{unit}/h"));
         let note = if avg { "  (average)" } else { "" };
         prog.push(("Speed", format!("{} {u}{note}", fmt::num(s))));
     }
-    if let Some(eta) = sim.eta() {
-        prog.push(("ETA", fmt::duration(eta)));
+    if let Some((eta, avg)) = sim.eta() {
+        let note = if avg { "  (from the average)" } else { "" };
+        prog.push(("ETA", format!("{}{note}", fmt::duration(eta))));
     }
     if let Some(w) = p.walltime {
         let lim = p
@@ -218,7 +248,11 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     }
 
     let s = &st.slurm;
-    if s.job_id.is_some() || s.job_name.is_some() || s.next_job_id.is_some() {
+    if s.job_id.is_some()
+        || s.job_name.is_some()
+        || s.next_job_id.is_some()
+        || !s.previous_job_ids.is_empty()
+    {
         section(&mut out, "Slurm");
         if let Some(id) = &s.job_id {
             let status = match (snap, sim.job(snap)) {
@@ -234,6 +268,10 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             };
             kv(&mut out, "Job", format!("{id}  {status}"));
         }
+        if let Some(n) = sim.job_number() {
+            kv(&mut out, "Earlier jobs", s.previous_job_ids.join(", "));
+            kv(&mut out, "", format!("this is job {n} of this simulation"));
+        }
         if let Some(n) = &s.job_name {
             kv(&mut out, "Job name", n.clone());
         }
@@ -241,10 +279,13 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             kv(&mut out, "Partition", pt.clone());
         }
         if let Some(n) = &s.next_job_id {
-            let state = snap
-                .and_then(|sn| sn.find(n))
-                .map(|j| format!("  {}", j.state))
-                .unwrap_or_default();
+            let state = match snap {
+                Some(sn) => match sn.find(n) {
+                    Some(j) => format!("  {}  {}", j.state, j.reason),
+                    None => "  not in squeue".into(),
+                },
+                None => String::new(),
+            };
             kv(&mut out, "Next job", format!("{n}{state}"));
         }
     }
@@ -287,6 +328,42 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
         for (i, img) in st.images.iter().enumerate() {
             let title = img.title.as_deref().map(|t| format!("  {t}")).unwrap_or_default();
             kv(&mut out, &format!("{}", i + 1), format!("{}{title}", img.file));
+        }
+    }
+
+    if !st.history.series.is_empty() {
+        section(&mut out, "History");
+        let h = &st.history;
+        let width = h
+            .series
+            .iter()
+            .map(|(k, _)| k.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(KEY_WIDTH, 32);
+        let per = if h.time.is_some() && !unit.is_empty() {
+            format!("/{unit}")
+        } else if h.time.is_some() {
+            String::new()
+        } else {
+            "/point".into()
+        };
+        for (key, y) in &h.series {
+            let log = fmt::wants_log(y);
+            let mut spans = vec![
+                Span::raw(format!("{:<width$} ", fmt::trunc(key, width))).dim(),
+                Span::styled(fmt::sparkline(y, 32, log), Style::new().fg(Color::Cyan)),
+            ];
+            if let Some(last) = y.iter().rev().find(|v| v.is_finite()) {
+                spans.push(Span::raw(format!("  {}", fmt::num(*last))));
+            }
+            if let Some(r) = growth_rate(h.time.as_deref(), y) {
+                spans.push(Span::raw(format!("  rate {:+.2e}{per}", r)).dim());
+            }
+            if log {
+                spans.push(Span::raw("  log").dim());
+            }
+            out.push(Line::from(spans));
         }
     }
 
