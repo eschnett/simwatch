@@ -1,10 +1,15 @@
 [package]
 name = "simwatch"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 description = "A TUI to watch HPC simulation progress"
 license = "MIT"
+repository = "https://github.com/eschnett/simwatch"
+readme = "README.md"
+keywords = ["hpc", "slurm", "simulation", "tui", "monitoring"]
+categories = ["command-line-utilities", "science"]
+exclude = [".github/", ".claude/", "CLAUDE.md"]
 rust-version = "1.90"
 
 [dependencies]
