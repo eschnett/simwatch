@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 description = "A TUI to watch HPC simulation progress"
 license = "MIT"
-rust-version = "1.86"
+rust-version = "1.90"
 
 [dependencies]
 anyhow = "1"
@@ -17,6 +17,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 ratatui = "0.30"
 ratatui-image = { version = "11.1", default-features = false, features = ["crossterm"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.9"
 
 [dev-dependencies]

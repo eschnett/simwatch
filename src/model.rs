@@ -1,6 +1,6 @@
 //! Simulations as seen by SimWatch, and their derived health.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
@@ -8,28 +8,58 @@ use chrono::{DateTime, Utc};
 use crate::format::{Entry, Status};
 use crate::slurm::{self, Job};
 
+/// Identifies a simulation: its host (`None` for local) and directory
+pub type SimId = (Option<String>, PathBuf);
+
 /// What SimWatch knows about one simulation directory
 #[derive(Clone, Debug)]
 pub struct Sim {
+    /// The remote host, or `None` for a local directory
+    pub host: Option<String>,
     pub dir: PathBuf,
     /// Modification time and size of the status file when it was last read
     pub mtime: Option<SystemTime>,
     pub size: u64,
+    /// Whether reading the status file has been attempted
+    pub read: bool,
     /// The last successfully parsed contents
     pub status: Option<Status>,
     /// Set if the most recent read or parse failed
     pub error: Option<String>,
+    /// The raw text, if it was read in the latest pass; only kept when
+    /// serving a remote client, which parses it itself
+    pub text: Option<String>,
 }
 
 impl Sim {
     pub fn new(dir: PathBuf) -> Self {
+        Self::on(None, dir)
+    }
+
+    pub fn on(host: Option<String>, dir: PathBuf) -> Self {
         Sim {
+            host,
             dir,
             mtime: None,
             size: 0,
+            read: false,
             status: None,
             error: None,
+            text: None,
         }
+    }
+
+    pub fn id(&self) -> SimId {
+        (self.host.clone(), self.dir.clone())
+    }
+
+    pub fn is(&self, id: &SimId) -> bool {
+        self.host == id.0 && self.dir == id.1
+    }
+
+    /// `host:dir` for remote simulations, else the directory
+    pub fn location(&self) -> String {
+        location(self.host.as_deref(), &self.dir)
     }
 
     pub fn st(&self) -> &Status {
@@ -101,12 +131,11 @@ impl Sim {
     /// Estimated seconds until the end, and whether it comes from an average
     pub fn eta(&self) -> Option<(f64, bool)> {
         let p = &self.st().progress;
-        if p.fraction.is_none() {
-            if let (Some(t), Some(t_end), Some((speed, avg))) = (p.time, p.time_end, self.speed()) {
-                let remaining = t_end - t;
-                return (speed > 0.0 && remaining > 0.0)
-                    .then(|| (remaining / speed * 3600.0, avg));
-            }
+        if p.fraction.is_none()
+            && let (Some(t), Some(t_end), Some((speed, avg))) = (p.time, p.time_end, self.speed())
+        {
+            let remaining = t_end - t;
+            return (speed > 0.0 && remaining > 0.0).then(|| (remaining / speed * 3600.0, avg));
         }
         // From the fraction done in the wall time so far
         let (f, wall) = (self.fraction()?, p.walltime?);
@@ -274,6 +303,14 @@ impl Health {
     }
 }
 
+/// `host:path`, or `path` for local paths
+pub fn location(host: Option<&str>, path: &Path) -> String {
+    match host {
+        Some(h) => format!("{h}:{}", path.display()),
+        None => path.display().to_string(),
+    }
+}
+
 pub fn health(
     sim: &Sim,
     now: DateTime<Utc>,
@@ -299,9 +336,7 @@ pub fn health(
         Some("finished" | "done" | "completed" | "complete" | "success" | "succeeded") => {
             Health::Finished
         }
-        Some("failed" | "error" | "crashed" | "aborted" | "killed" | "cancelled") => {
-            Health::Failed
-        }
+        Some("failed" | "error" | "crashed" | "aborted" | "killed" | "cancelled") => Health::Failed,
         Some("stopped" | "checkpointed" | "requeued" | "paused" | "suspended") => Health::Stopped,
         Some("queued" | "pending" | "submitted") => Health::Queued,
         _ => Health::Running,
@@ -323,7 +358,9 @@ pub fn health(
     }
 
     match kind {
-        Health::Queued | Health::Stopped | Health::Failed if next.is_some() || kind == Health::Queued => {
+        Health::Queued | Health::Stopped | Health::Failed
+            if next.is_some() || kind == Health::Queued =>
+        {
             match job {
                 Some(Some(j)) if job_state(j) == "PENDING" => Health::Queued,
                 // Started, but the simulation has not written its first status yet
@@ -363,7 +400,9 @@ mod tests {
     fn snap() -> Snapshot {
         Snapshot::new(
             now(),
-            parse_squeue("100|RUNNING|a|q|1|1:00|2:00|cn1\n101|PENDING|b|q|1|0:00|2:00|(Priority)\n"),
+            parse_squeue(
+                "100|RUNNING|a|q|1|1:00|2:00|cn1\n101|PENDING|b|q|1|0:00|2:00|(Priority)\n",
+            ),
         )
     }
 
@@ -397,7 +436,9 @@ mod tests {
     fn slurm_states() {
         let snap = snap();
         let s = |id: &str, status: &str| {
-            format!("status = \"{status}\"\nupdated = 2026-10-02T15:59:00Z\nslurm.job_id = \"{id}\"")
+            format!(
+                "status = \"{status}\"\nupdated = 2026-10-02T15:59:00Z\nslurm.job_id = \"{id}\""
+            )
         };
         assert_eq!(h(&s("100", "running"), Some(&snap)), Health::Running);
         assert_eq!(h(&s("999", "running"), Some(&snap)), Health::Lost);
@@ -470,18 +511,23 @@ x = 1.5
     fn unreadable() {
         let mut s = Sim::new(PathBuf::from("/x"));
         s.error = Some("bad".into());
-        assert_eq!(health(&s, now(), None, &HealthParams::default()), Health::Unreadable);
+        assert_eq!(
+            health(&s, now(), None, &HealthParams::default()),
+            Health::Unreadable
+        );
         // A previous good parse wins over a later error
         let mut s = sim("status = \"finished\"");
         s.error = Some("bad".into());
-        assert_eq!(health(&s, now(), None, &HealthParams::default()), Health::Finished);
+        assert_eq!(
+            health(&s, now(), None, &HealthParams::default()),
+            Health::Finished
+        );
     }
 
     #[test]
     fn derived_numbers() {
-        let s = sim(
-            "[progress]\ntime = 25.0\ntime_end = 100.0\nwalltime = 3600.0\ntime_start = 5.0",
-        );
+        let s =
+            sim("[progress]\ntime = 25.0\ntime_end = 100.0\nwalltime = 3600.0\ntime_start = 5.0");
         assert_eq!(s.fraction(), Some(0.25));
         assert_eq!(s.speed(), Some((20.0, true)));
         assert_eq!(s.eta(), Some((75.0 / 20.0 * 3600.0, true)));

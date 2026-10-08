@@ -31,7 +31,6 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         app.card_offset = sel + 1 - fit;
     }
     app.card_offset = app.card_offset.min(vis.len().saturating_sub(1));
-    let snap = app.slurm.as_ref();
     for (n, (i, h)) in vis.iter().enumerate().skip(app.card_offset).take(fit) {
         let y = area.y + ((n - app.card_offset) as u16) * CARD_HEIGHT;
         let height = CARD_HEIGHT.min(area.bottom().saturating_sub(y));
@@ -39,7 +38,8 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
             break;
         }
         let rect = Rect::new(area.x, y, area.width, height);
-        card(f, rect, &app.sims[*i], *h, snap, n == sel);
+        let sim = &app.sims[*i];
+        card(f, rect, sim, *h, app.snap(sim), n == sel);
     }
 }
 
@@ -65,9 +65,19 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
             Span::raw(sim.display_name()).bold(),
             Span::raw(" "),
             Span::styled(format!("{} ", c(Col::State)), hs),
-            Span::raw(st.group.as_deref().map(|g| format!("· {g} ")).unwrap_or_default()).dim(),
+            Span::raw(
+                st.group
+                    .as_deref()
+                    .map(|g| format!("· {g} "))
+                    .unwrap_or_default(),
+            )
+            .dim(),
         ]))
-        .title_top(Line::from(format!(" {} ", sim.dir.display())).dim().right_aligned());
+        .title_top(
+            Line::from(format!(" {} ", sim.location()))
+                .dim()
+                .right_aligned(),
+        );
 
     let dim = |s: &str| Span::raw(s.to_string()).dim();
     let mut progress: Vec<Span> = Vec::new();
@@ -90,7 +100,10 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
     add("updated", updated.as_deref().unwrap_or(""));
 
     let message = match (&sim.error, &st.message) {
-        (Some(e), _) => Line::from(Span::styled(format!("status file: {e}"), Style::new().fg(Color::Red))),
+        (Some(e), _) => Line::from(Span::styled(
+            format!("status file: {e}"),
+            Style::new().fg(Color::Red),
+        )),
         (None, Some(m)) => Line::from(m.clone()),
         (None, None) => Line::from(dim("–")),
     };
@@ -150,7 +163,11 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
             .iter()
             .take(12)
             .map(|e| {
-                let unit = e.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+                let unit = e
+                    .unit
+                    .as_deref()
+                    .map(|u| format!(" {u}"))
+                    .unwrap_or_default();
                 format!("{}={}{unit}", e.key, fmt::value(&e.value))
             })
             .collect();
@@ -162,12 +179,20 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
             if !spans.is_empty() {
                 spans.push(dim("   "));
             }
-            let unit = it.value.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+            let unit = it
+                .value
+                .unit
+                .as_deref()
+                .map(|u| format!(" {u}"))
+                .unwrap_or_default();
             spans.push(dim(&format!("{} ", it.label)));
             spans.push(Span::raw(format!("{}{unit}", fmt::value(&it.value.value))));
             if let Some(h) = it.history {
                 let line = fmt::sparkline(h, 12, fmt::wants_log(h));
-                spans.push(Span::styled(format!(" {line}"), Style::new().fg(Color::Cyan)));
+                spans.push(Span::styled(
+                    format!(" {line}"),
+                    Style::new().fg(Color::Cyan),
+                ));
             }
         }
         Line::from(spans)

@@ -7,11 +7,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Fields requested from squeue, separated by `|`
 const SQUEUE_FORMAT: &str = "%i|%T|%j|%P|%D|%M|%l|%R";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
     pub state: String,
@@ -138,7 +139,8 @@ pub fn query(program: &str, timeout: Duration) -> Result<Snapshot, QueryError> {
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_default();
     let mut cmd = Command::new(program);
-    cmd.arg("--noheader").arg(format!("--format={SQUEUE_FORMAT}"));
+    cmd.arg("--noheader")
+        .arg(format!("--format={SQUEUE_FORMAT}"));
     if user.is_empty() {
         cmd.arg("--me");
     } else {

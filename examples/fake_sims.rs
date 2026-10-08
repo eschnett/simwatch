@@ -46,11 +46,18 @@ fn main() {
 
 fn now_minus(secs: i64) -> Value {
     let t = Utc::now() - chrono::Duration::seconds(secs);
-    Value::Datetime(t.to_rfc3339_opts(SecondsFormat::Secs, true).parse().unwrap())
+    Value::Datetime(
+        t.to_rfc3339_opts(SecondsFormat::Secs, true)
+            .parse()
+            .unwrap(),
+    )
 }
 
 fn table(pairs: &[(&str, Value)]) -> Table {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
 }
 
 fn s(x: &str) -> Value {
@@ -78,7 +85,10 @@ fn write_atomic(path: &Path, bytes: &[u8]) {
 }
 
 fn write_status(dir: &Path, t: &Table) {
-    write_atomic(&dir.join("simwatch.toml"), toml::to_string(t).unwrap().as_bytes());
+    write_atomic(
+        &dir.join("simwatch.toml"),
+        toml::to_string(t).unwrap().as_bytes(),
+    );
 }
 
 fn write_png(path: &Path, img: &RgbImage) {
@@ -118,7 +128,10 @@ fn write_bbh(dir: &Path, t: f64) {
         ("updated", now_minus(0)),
         ("started", now_minus(started)),
         ("update_interval", i(5)),
-        ("message", s(&format!("chunk {}: both horizons found", (t / 0.5) as i64))),
+        (
+            "message",
+            s(&format!("chunk {}: both horizons found", (t / 0.5) as i64)),
+        ),
         ("code", s("TreeGeneralizedHarmonic")),
         ("host", s("cn042")),
         ("pid", i(31337)),
@@ -175,7 +188,10 @@ fn write_bbh(dir: &Path, t: f64) {
             Value::Table(table(&[
                 ("file", s("plots/constraints.png")),
                 ("title", s("Constraint violation")),
-                ("description", s("log10 of the L2 norm of the Hamiltonian constraint vs. time")),
+                (
+                    "description",
+                    s("log10 of the L2 norm of the Hamiltonian constraint vs. time"),
+                ),
             ])),
         ]),
     );
@@ -192,7 +208,10 @@ fn write_bbh(dir: &Path, t: f64) {
     );
     st.insert(
         "mesh".into(),
-        Value::Table(table(&[("blocks", i(4096 + (t * 3.0) as i64)), ("levels", i(9))])),
+        Value::Table(table(&[
+            ("blocks", i(4096 + (t * 3.0) as i64)),
+            ("levels", i(9)),
+        ])),
     );
     st.insert(
         "separation".into(),
@@ -204,13 +223,22 @@ fn write_bbh(dir: &Path, t: f64) {
         Value::Array(vec![s("constraints.ham_l2"), s("separation")]),
     );
     // The last 40 chunks, as a simulation's writer would have recorded them
-    let times: Vec<f64> = (0..40).map(|k| t - 1.5 * (39 - k) as f64).filter(|t| *t >= 0.0).collect();
+    let times: Vec<f64> = (0..40)
+        .map(|k| t - 1.5 * (39 - k) as f64)
+        .filter(|t| *t >= 0.0)
+        .collect();
     st.insert(
         "history".into(),
         Value::Table(table(&[
             ("time", arr(&times)),
-            ("constraints.ham_l2", arr(&times.iter().map(|t| ham_l2(*t)).collect::<Vec<_>>())),
-            ("separation", arr(&times.iter().map(|t| orbit(*t).0).collect::<Vec<_>>())),
+            (
+                "constraints.ham_l2",
+                arr(&times.iter().map(|t| ham_l2(*t)).collect::<Vec<_>>()),
+            ),
+            (
+                "separation",
+                arr(&times.iter().map(|t| orbit(*t).0).collect::<Vec<_>>()),
+            ),
         ])),
     );
     write_status(dir, &st);
@@ -241,7 +269,10 @@ fn write_worker(dir: &Path, w: i64, t: f64) {
             ("walltime", f(t * 3.0)),
         ])),
     );
-    st.insert("resources".into(), Value::Table(table(&[("threads", i(8))])));
+    st.insert(
+        "resources".into(),
+        Value::Table(table(&[("threads", i(8))])),
+    );
     write_status(dir, &st);
 }
 
@@ -265,7 +296,10 @@ fn write_static(root: &Path) {
             ("walltime", f(4.0 * 3600.0 - 1200.0)),
         ])),
     );
-    st.insert("slurm".into(), Value::Table(table(&[("job_id", i(1234500))])));
+    st.insert(
+        "slurm".into(),
+        Value::Table(table(&[("job_id", i(1234500))])),
+    );
     st.insert(
         "black_holes".into(),
         Value::Array(vec![Value::Table(table(&[
@@ -301,11 +335,18 @@ fn write_static(root: &Path) {
         ("status", s("failed")),
         ("updated", now_minus(7200)),
         ("started", now_minus(9000)),
-        ("message", s("non-finite value in Π at t = 37.25 M (block 1871)")),
+        (
+            "message",
+            s("non-finite value in Π at t = 37.25 M (block 1871)"),
+        ),
     ]);
     st.insert(
         "progress".into(),
-        Value::Table(table(&[("iteration", i(4768)), ("time", f(37.25)), ("time_end", f(T_END))])),
+        Value::Table(table(&[
+            ("iteration", i(4768)),
+            ("time", f(37.25)),
+            ("time_end", f(T_END)),
+        ])),
     );
     write_status(&root.join("bbh-q4"), &st);
 
@@ -324,18 +365,28 @@ fn write_static(root: &Path) {
         ("name", s("bbh-q1-d14")),
         ("status", s("stopped")),
         ("updated", now_minus(600)),
-        ("message", s("wall time limit reached; checkpoint written; resubmitted")),
+        (
+            "message",
+            s("wall time limit reached; checkpoint written; resubmitted"),
+        ),
     ]);
     st.insert(
         "progress".into(),
-        Value::Table(table(&[("iteration", i(98304)), ("time", f(512.0)), ("time_end", f(3000.0))])),
+        Value::Table(table(&[
+            ("iteration", i(98304)),
+            ("time", f(512.0)),
+            ("time_end", f(3000.0)),
+        ])),
     );
     st.insert(
         "slurm".into(),
         Value::Table(table(&[
             ("job_id", s("1234400")),
             ("next_job_id", s("1234602")),
-            ("previous_job_ids", Value::Array(vec![s("1233001"), s("1233950")])),
+            (
+                "previous_job_ids",
+                Value::Array(vec![s("1233001"), s("1233950")]),
+            ),
         ])),
     );
     write_status(&root.join("bbh-q1-d14"), &st);
@@ -350,7 +401,10 @@ fn write_static(root: &Path) {
     ]);
     st.insert(
         "progress".into(),
-        Value::Table(table(&[("fraction", f(123.0 / 600.0)), ("walltime", f(5.0 * 3600.0))])),
+        Value::Table(table(&[
+            ("fraction", f(123.0 / 600.0)),
+            ("walltime", f(5.0 * 3600.0)),
+        ])),
     );
     st.insert(
         "resources".into(),
@@ -368,7 +422,10 @@ fn write_static(root: &Path) {
         .as_bytes(),
     );
 
-    write_atomic(&root.join("broken/simwatch.toml"), b"name = \"broken\nstatus = = running\n");
+    write_atomic(
+        &root.join("broken/simwatch.toml"),
+        b"name = \"broken\nstatus = = running\n",
+    );
 
     let st = table(&[
         ("name", s("big-picture")),
@@ -377,9 +434,18 @@ fn write_static(root: &Path) {
         (
             "images",
             Value::Array(vec![
-                Value::Table(table(&[("file", s("too-wide.png")), ("title", s("Too wide"))])),
-                Value::Table(table(&[("file", s("../escape.png")), ("title", s("Escaping"))])),
-                Value::Table(table(&[("file", s("missing.png")), ("title", s("Missing"))])),
+                Value::Table(table(&[
+                    ("file", s("too-wide.png")),
+                    ("title", s("Too wide")),
+                ])),
+                Value::Table(table(&[
+                    ("file", s("../escape.png")),
+                    ("title", s("Escaping")),
+                ])),
+                Value::Table(table(&[
+                    ("file", s("missing.png")),
+                    ("title", s("Missing")),
+                ])),
             ]),
         ),
     ]);
@@ -389,7 +455,10 @@ fn write_static(root: &Path) {
         &RgbImage::from_pixel(2000, 10, Rgb([200, 0, 0])),
     );
     // Exists, but outside the simulation directory, so SimWatch must not show it
-    write_png(&root.join("escape.png"), &RgbImage::from_pixel(40, 40, Rgb([0, 200, 0])));
+    write_png(
+        &root.join("escape.png"),
+        &RgbImage::from_pixel(40, 40, Rgb([0, 200, 0])),
+    );
 }
 
 // A tiny rasterizer
@@ -421,7 +490,12 @@ fn line(img: &mut RgbImage, (x0, y0): (f64, f64), (x1, y1): (f64, f64), c: Rgb<u
 
 fn frame(img: &mut RgbImage, m: f64) {
     let (w, h) = (img.width() as f64 - 1.0, img.height() as f64 - 1.0);
-    for (a, b) in [((m, m), (w - m, m)), ((w - m, m), (w - m, h - m)), ((w - m, h - m), (m, h - m)), ((m, h - m), (m, m))] {
+    for (a, b) in [
+        ((m, m), (w - m, m)),
+        ((w - m, m), (w - m, h - m)),
+        ((w - m, h - m), (m, h - m)),
+        ((m, h - m), (m, m)),
+    ] {
         line(img, a, b, AXIS, 1);
     }
 }
@@ -438,7 +512,10 @@ fn track_plot(t: f64) -> RgbImage {
     for k in 0..=steps {
         let tk = t * k as f64 / steps.max(1) as f64;
         let (r, phase) = orbit(tk);
-        let p1 = (cx + 0.5 * r * phase.cos() * scale, cy - 0.5 * r * phase.sin() * scale);
+        let p1 = (
+            cx + 0.5 * r * phase.cos() * scale,
+            cy - 0.5 * r * phase.sin() * scale,
+        );
         let p2 = (2.0 * cx - p1.0, 2.0 * cy - p1.1);
         if let Some([q1, q2]) = prev {
             line(&mut img, q1, p1, ORANGE, 2);
