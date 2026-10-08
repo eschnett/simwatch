@@ -51,7 +51,10 @@ enum Cmd {
     /// Connect interactively unless connected; answer when done
     Connect(Sender<()>),
     /// The connection with this number ended
-    Lost { generation: u64, why: String },
+    Lost {
+        generation: u64,
+        why: String,
+    },
 }
 
 /// A remote host, handled by a background thread
@@ -194,7 +197,12 @@ impl Control {
                         continue;
                     }
                     let key = (dir.clone(), file.clone());
-                    self.pending.lock().unwrap().entry(key).or_default().push(reply);
+                    self.pending
+                        .lock()
+                        .unwrap()
+                        .entry(key)
+                        .or_default()
+                        .push(reply);
                     self.send(&ToServer::Image { dir, file });
                 }
                 Cmd::Connect(done) => {
@@ -314,7 +322,9 @@ impl Control {
         let res = if interactive {
             ready.recv().map_err(|_| MagicError::NoAnswer)
         } else {
-            ready.recv_timeout(BATCH_TIMEOUT).map_err(|_| MagicError::Other("timed out".into()))
+            ready
+                .recv_timeout(BATCH_TIMEOUT)
+                .map_err(|_| MagicError::Other("timed out".into()))
         };
         match res.and_then(|r| r) {
             Ok(()) => Ok(conn),
@@ -350,7 +360,13 @@ fn ssh_command(cfg: &Config, host: &str, batch: bool) -> Command {
     let mut cmd = Command::new(&cfg.ssh[0]);
     cmd.args(&cfg.ssh[1..]);
     // Notice a dead connection within about two minutes
-    cmd.args(["-T", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"]);
+    cmd.args([
+        "-T",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ServerAliveCountMax=4",
+    ]);
     if batch {
         // Never prompt
         cmd.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=30"]);

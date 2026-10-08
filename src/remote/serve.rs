@@ -43,7 +43,10 @@ pub fn serve(input: impl Read + Send + 'static, mut output: impl Write) -> Resul
         None => return Ok(()),
     };
     if hello.protocol != PROTOCOL {
-        bail!("client speaks protocol {}, this is {PROTOCOL}", hello.protocol);
+        bail!(
+            "client speaks protocol {}, this is {PROTOCOL}",
+            hello.protocol
+        );
     }
     // The server's own configuration file may set squeue_program
     let mut cfg = match Config::load(&Cli::parse_from(["simwatch"])) {
@@ -238,7 +241,9 @@ mod tests {
         let dir = tmp.path().join("a");
         create_dir(&dir).unwrap();
         write(dir.join(STATUS_FILE), "name = \"one\"").unwrap();
-        RgbImage::from_pixel(8, 6, Rgb([1, 2, 3])).save(dir.join("p.png")).unwrap();
+        RgbImage::from_pixel(8, 6, Rgb([1, 2, 3]))
+            .save(dir.join("p.png"))
+            .unwrap();
         write(tmp.path().join("secret.png"), "x").unwrap();
 
         let (client, server) = UnixStream::pair().unwrap();
@@ -317,7 +322,9 @@ mod tests {
         let mut state = State::new("h");
         let s = until(&mut r, &mut state, sims);
         assert_eq!(s[0].st().name.as_deref(), Some("x"));
-        until(&mut r, &mut state, |m, _, _| (m == FromServer::Done).then_some(()));
+        until(&mut r, &mut state, |m, _, _| {
+            (m == FromServer::Done).then_some(())
+        });
         handle.join().unwrap().unwrap();
     }
 }

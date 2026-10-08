@@ -271,8 +271,8 @@ impl Config {
 }
 
 fn read_file_config(path: &Path) -> Result<FileConfig> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
@@ -326,7 +326,10 @@ images = "none"
         assert_eq!(c.remotes[0].host, "sym");
         assert_eq!(c.remotes[0].roots, ["/a", "~/c"]);
         assert_eq!(c.remotes[1].roots, ["b"]);
-        assert_eq!(c.sources(), [None, Some("sym".into()), Some("other".into())]);
+        assert_eq!(
+            c.sources(),
+            [None, Some("sym".into()), Some("other".into())]
+        );
         assert_eq!(c.root_names(), ["local", "sym:/a", "sym:~/c", "other:b"]);
 
         // Only remote roots: no local source

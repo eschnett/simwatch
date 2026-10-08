@@ -134,8 +134,7 @@ impl Sim {
         if p.fraction.is_none() {
             if let (Some(t), Some(t_end), Some((speed, avg))) = (p.time, p.time_end, self.speed()) {
                 let remaining = t_end - t;
-                return (speed > 0.0 && remaining > 0.0)
-                    .then(|| (remaining / speed * 3600.0, avg));
+                return (speed > 0.0 && remaining > 0.0).then(|| (remaining / speed * 3600.0, avg));
             }
         }
         // From the fraction done in the wall time so far
@@ -337,9 +336,7 @@ pub fn health(
         Some("finished" | "done" | "completed" | "complete" | "success" | "succeeded") => {
             Health::Finished
         }
-        Some("failed" | "error" | "crashed" | "aborted" | "killed" | "cancelled") => {
-            Health::Failed
-        }
+        Some("failed" | "error" | "crashed" | "aborted" | "killed" | "cancelled") => Health::Failed,
         Some("stopped" | "checkpointed" | "requeued" | "paused" | "suspended") => Health::Stopped,
         Some("queued" | "pending" | "submitted") => Health::Queued,
         _ => Health::Running,
@@ -361,7 +358,9 @@ pub fn health(
     }
 
     match kind {
-        Health::Queued | Health::Stopped | Health::Failed if next.is_some() || kind == Health::Queued => {
+        Health::Queued | Health::Stopped | Health::Failed
+            if next.is_some() || kind == Health::Queued =>
+        {
             match job {
                 Some(Some(j)) if job_state(j) == "PENDING" => Health::Queued,
                 // Started, but the simulation has not written its first status yet
@@ -401,7 +400,9 @@ mod tests {
     fn snap() -> Snapshot {
         Snapshot::new(
             now(),
-            parse_squeue("100|RUNNING|a|q|1|1:00|2:00|cn1\n101|PENDING|b|q|1|0:00|2:00|(Priority)\n"),
+            parse_squeue(
+                "100|RUNNING|a|q|1|1:00|2:00|cn1\n101|PENDING|b|q|1|0:00|2:00|(Priority)\n",
+            ),
         )
     }
 
@@ -435,7 +436,9 @@ mod tests {
     fn slurm_states() {
         let snap = snap();
         let s = |id: &str, status: &str| {
-            format!("status = \"{status}\"\nupdated = 2026-10-02T15:59:00Z\nslurm.job_id = \"{id}\"")
+            format!(
+                "status = \"{status}\"\nupdated = 2026-10-02T15:59:00Z\nslurm.job_id = \"{id}\""
+            )
         };
         assert_eq!(h(&s("100", "running"), Some(&snap)), Health::Running);
         assert_eq!(h(&s("999", "running"), Some(&snap)), Health::Lost);
@@ -508,18 +511,23 @@ x = 1.5
     fn unreadable() {
         let mut s = Sim::new(PathBuf::from("/x"));
         s.error = Some("bad".into());
-        assert_eq!(health(&s, now(), None, &HealthParams::default()), Health::Unreadable);
+        assert_eq!(
+            health(&s, now(), None, &HealthParams::default()),
+            Health::Unreadable
+        );
         // A previous good parse wins over a later error
         let mut s = sim("status = \"finished\"");
         s.error = Some("bad".into());
-        assert_eq!(health(&s, now(), None, &HealthParams::default()), Health::Finished);
+        assert_eq!(
+            health(&s, now(), None, &HealthParams::default()),
+            Health::Finished
+        );
     }
 
     #[test]
     fn derived_numbers() {
-        let s = sim(
-            "[progress]\ntime = 25.0\ntime_end = 100.0\nwalltime = 3600.0\ntime_start = 5.0",
-        );
+        let s =
+            sim("[progress]\ntime = 25.0\ntime_end = 100.0\nwalltime = 3600.0\ntime_start = 5.0");
         assert_eq!(s.fraction(), Some(0.25));
         assert_eq!(s.speed(), Some((20.0, true)));
         assert_eq!(s.eta(), Some((75.0 / 20.0 * 3600.0, true)));

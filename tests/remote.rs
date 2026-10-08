@@ -25,7 +25,11 @@ fn setup(dir: &Path, remote_program: &str) -> std::path::PathBuf {
     .unwrap();
     for (sub, name) in [("remote/a", "far-away"), ("local/b", "close-by")] {
         create_dir_all(dir.join(sub)).unwrap();
-        write(dir.join(sub).join("simwatch.toml"), format!("name = \"{name}\"\n")).unwrap();
+        write(
+            dir.join(sub).join("simwatch.toml"),
+            format!("name = \"{name}\"\n"),
+        )
+        .unwrap();
     }
     cfg
 }
@@ -58,8 +62,14 @@ fn print_remote() {
     let local = dir.join("local").display().to_string();
     let out = run(dir, &cfg, &[remote, local]);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("far-away") && stdout.contains("close-by"), "{stdout}");
-    assert!(stdout.contains("Host") && stdout.contains("fakehost"), "{stdout}");
+    assert!(
+        stdout.contains("far-away") && stdout.contains("close-by"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Host") && stdout.contains("fakehost"),
+        "{stdout}"
+    );
     assert!(stdout.contains("local"), "{stdout}");
 }
 
@@ -71,5 +81,8 @@ fn missing_remote_program() {
     let remote = format!("fakehost:{}", dir.join("remote").display());
     let out = run(dir, &cfg, &[remote]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("fakehost: `/nonexistent/simwatch` not found"), "{stderr}");
+    assert!(
+        stderr.contains("fakehost: `/nonexistent/simwatch` not found"),
+        "{stderr}"
+    );
 }

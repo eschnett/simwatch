@@ -220,7 +220,11 @@ impl App {
             Update::Sims(sims) => {
                 src.read.finish();
                 src.sims = sims;
-                self.sims = self.sources.iter().flat_map(|s| s.sims.iter().cloned()).collect();
+                self.sims = self
+                    .sources
+                    .iter()
+                    .flat_map(|s| s.sims.iter().cloned())
+                    .collect();
             }
             Update::SlurmStarted => src.squeue.start(),
             Update::Slurm(r) => {
@@ -252,7 +256,11 @@ impl App {
 
     /// The Slurm snapshot of a simulation's host
     pub fn snap(&self, sim: &Sim) -> Option<&Snapshot> {
-        self.sources.iter().find(|s| s.host == sim.host)?.slurm.as_ref()
+        self.sources
+            .iter()
+            .find(|s| s.host == sim.host)?
+            .slurm
+            .as_ref()
     }
 
     pub fn health(&self, sim: &Sim) -> Health {
@@ -273,7 +281,10 @@ impl App {
                     let s = &self.sims[*i];
                     s.display_name().to_lowercase().contains(&filter)
                         || s.location().to_lowercase().contains(&filter)
-                        || s.st().group.as_ref().is_some_and(|g| g.to_lowercase().contains(&filter))
+                        || s.st()
+                            .group
+                            .as_ref()
+                            .is_some_and(|g| g.to_lowercase().contains(&filter))
                 }
             })
             .collect();
@@ -511,7 +522,12 @@ impl App {
     }
 
     /// The image state for an image of a simulation, requesting it if needed
-    pub fn image(&mut self, sim: SimId, version: Option<SystemTime>, file: &str) -> &mut ImageState {
+    pub fn image(
+        &mut self,
+        sim: SimId,
+        version: Option<SystemTime>,
+        file: &str,
+    ) -> &mut ImageState {
         let key: ImageKey = (sim, file.to_string());
         let loader = self.loader.as_ref();
         let entry = self.images.entry(key.clone()).or_insert_with(|| {
@@ -609,7 +625,11 @@ impl App {
         if self.editing_filter || !self.filter.is_empty() {
             spans.push(Span::raw("   filter: ").dim());
             spans.push(Span::styled(
-                format!("{}{}", self.filter, if self.editing_filter { "▏" } else { "" }),
+                format!(
+                    "{}{}",
+                    self.filter,
+                    if self.editing_filter { "▏" } else { "" }
+                ),
                 Style::new().fg(Color::Yellow),
             ));
         }
@@ -642,7 +662,11 @@ impl App {
             } else {
                 spans.extend(source_full(src));
             }
-            let prefix = if compact { format!("{}: ", src.name()) } else { String::new() };
+            let prefix = if compact {
+                format!("{}: ", src.name())
+            } else {
+                String::new()
+            };
             warnings.extend(
                 src.scan_warnings
                     .iter()
@@ -692,12 +716,16 @@ fn source_full(src: &Source) -> Vec<Span<'static>> {
     let activity = |name: &str, a: &Activity| -> Span<'static> {
         match (a.busy, a.done) {
             (Some(t), _) if name == "scan" && t.elapsed() > SLOW_SCAN => Span::styled(
-                format!("{spin} {name} slow ({})", fmt::age(t.elapsed().as_secs_f64())),
+                format!(
+                    "{spin} {name} slow ({})",
+                    fmt::age(t.elapsed().as_secs_f64())
+                ),
                 Style::new().fg(Color::Yellow).bold(),
             ),
-            (Some(_), _) => {
-                Span::styled(format!("{spin} {name}"), Style::new().fg(Color::Cyan).bold())
-            }
+            (Some(_), _) => Span::styled(
+                format!("{spin} {name}"),
+                Style::new().fg(Color::Cyan).bold(),
+            ),
             (None, Some(t)) => Span::raw(format!(
                 "{name} {} ago",
                 fmt::age(t.elapsed().as_secs_f64())
@@ -707,7 +735,12 @@ fn source_full(src: &Source) -> Vec<Span<'static>> {
         }
     };
     let sep = || Span::raw(" │ ").dim();
-    let mut spans = vec![activity("scan", &src.scan), sep(), activity("read", &src.read), sep()];
+    let mut spans = vec![
+        activity("scan", &src.scan),
+        sep(),
+        activity("read", &src.read),
+        sep(),
+    ];
     if let Some(why) = &src.slurm_disabled {
         spans.push(Span::raw(format!("squeue off ({why})")).dim());
     } else {
@@ -731,11 +764,15 @@ fn source_full(src: &Source) -> Vec<Span<'static>> {
 
 /// Activity of one of several sources, in a few characters
 fn source_compact(src: &Source) -> Vec<Span<'static>> {
-    let busy: Vec<&str> = [("scan", &src.scan), ("read", &src.read), ("squeue", &src.squeue)]
-        .into_iter()
-        .filter(|(_, a)| a.busy.is_some())
-        .map(|(n, _)| n)
-        .collect();
+    let busy: Vec<&str> = [
+        ("scan", &src.scan),
+        ("read", &src.read),
+        ("squeue", &src.squeue),
+    ]
+    .into_iter()
+    .filter(|(_, a)| a.busy.is_some())
+    .map(|(n, _)| n)
+    .collect();
     let mut spans = vec![if !busy.is_empty() {
         Span::styled(
             format!("{} {}", spinner(), busy.join(" ")),
@@ -748,10 +785,20 @@ fn source_compact(src: &Source) -> Vec<Span<'static>> {
         }
     }];
     if let Some(s) = &src.slurm {
-        spans.push(Span::raw(format!(", {} R {} PD", s.count("RUNNING"), s.count("PENDING"))).dim());
+        spans.push(
+            Span::raw(format!(
+                ", {} R {} PD",
+                s.count("RUNNING"),
+                s.count("PENDING")
+            ))
+            .dim(),
+        );
     }
     if src.slurm_error.is_some() {
-        spans.push(Span::styled(" (squeue failed)", Style::new().fg(Color::Red)));
+        spans.push(Span::styled(
+            " (squeue failed)",
+            Style::new().fg(Color::Red),
+        ));
     }
     spans
 }
@@ -787,7 +834,11 @@ fn reconnect(terminal: &mut DefaultTerminal, monitor: &Monitor) -> Result<()> {
     use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
     TUI_ACTIVE.store(false, Ordering::Relaxed);
     crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(std::io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
+    crossterm::execute!(
+        std::io::stdout(),
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    )?;
     eprintln!("simwatch: reconnecting (Ctrl-C quits)");
     monitor.reconnect();
     crossterm::terminal::enable_raw_mode()?;
@@ -799,7 +850,12 @@ fn reconnect(terminal: &mut DefaultTerminal, monitor: &Monitor) -> Result<()> {
 }
 
 /// Run the interactive UI until the user quits
-pub fn run(terminal: &mut DefaultTerminal, mut app: App, rx: Receiver<Tagged>, monitor: Monitor) -> Result<()> {
+pub fn run(
+    terminal: &mut DefaultTerminal,
+    mut app: App,
+    rx: Receiver<Tagged>,
+    monitor: Monitor,
+) -> Result<()> {
     let _ = *START;
     let mut last_draw = Instant::now() - Duration::from_secs(10);
     let mut dirty = true;
@@ -832,7 +888,9 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App, rx: Receiver<Tagged>, m
             dirty = false;
         }
 
-        let timeout = tick.saturating_sub(last_draw.elapsed()).min(Duration::from_millis(100));
+        let timeout = tick
+            .saturating_sub(last_draw.elapsed())
+            .min(Duration::from_millis(100));
         if event::poll(timeout)? {
             match event::read()? {
                 Event::Key(k) => app.handle_key(k, &monitor),
@@ -856,10 +914,10 @@ mod tests {
     use super::*;
     use crate::format::parse_status;
     use image::{Rgb, RgbImage};
-    use std::path::Path;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui_image::picker::ProtocolType;
+    use std::path::Path;
 
     fn sim(dir: &Path, text: &str) -> Sim {
         let mut s = Sim::new(dir.to_path_buf());
@@ -882,7 +940,11 @@ mod tests {
     }
 
     fn app(dir: &Path, picker: Option<Picker>) -> App {
-        let mut app = App::new(Config::default(), picker, Box::new(|_, _, _| Err("no".into())));
+        let mut app = App::new(
+            Config::default(),
+            picker,
+            Box::new(|_, _, _| Err("no".into())),
+        );
         let now = Utc::now().to_rfc3339();
         app.sims = vec![
             sim(
@@ -959,7 +1021,10 @@ title = "Tracks"
         let mut app = app(tmp.path(), None);
         // Without groups or summaries there are no such columns
         let list = render(&mut app);
-        assert!(!list.contains("Group") && !list.contains("Summary"), "{list}");
+        assert!(
+            !list.contains("Group") && !list.contains("Summary"),
+            "{list}"
+        );
 
         app.sims.push(sim(
             &tmp.path().join("c"),

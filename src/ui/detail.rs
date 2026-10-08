@@ -43,7 +43,11 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let block = Block::bordered()
         .border_style(Style::new().fg(Color::DarkGray))
         .title(title)
-        .title_bottom(Line::from(" n/p: next/prev sim  [/]: image  Esc: back ").dim().right_aligned());
+        .title_bottom(
+            Line::from(" n/p: next/prev sim  [/]: image  Esc: back ")
+                .dim()
+                .right_aligned(),
+        );
     f.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -69,7 +73,10 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         let [pic, desc] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(desc_lines)]).areas(inner);
         if let Some(d) = &img.description {
-            f.render_widget(Paragraph::new(d.as_str()).wrap(Wrap { trim: true }).dim(), desc);
+            f.render_widget(
+                Paragraph::new(d.as_str()).wrap(Wrap { trim: true }).dim(),
+                desc,
+            );
         }
         match app.image(sim.id(), sim.mtime, &img.file) {
             ImageState::Loading => {
@@ -85,7 +92,11 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
             }
             ImageState::Ready(proto) => {
                 // Fit shrinks large images but never enlarges small ones
-                f.render_stateful_widget(StatefulImage::default().resize(Resize::Fit(None)), pic, proto.as_mut());
+                f.render_stateful_widget(
+                    StatefulImage::default().resize(Resize::Fit(None)),
+                    pic,
+                    proto.as_mut(),
+                );
             }
         }
     }
@@ -115,7 +126,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     kv(
         &mut out,
         "Name",
-        st.name.clone().unwrap_or_else(|| "(missing simulation name)".into()),
+        st.name
+            .clone()
+            .unwrap_or_else(|| "(missing simulation name)".into()),
     );
     kv(&mut out, "Directory", sim.location());
     let mut state = h.label().to_string();
@@ -145,7 +158,11 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     }
     if let Some(t) = st.started {
         let ago = fmt::duration((now - t).num_seconds() as f64);
-        kv(&mut out, "Started", format!("{}  ({ago} ago)", fmt::local_time(t)));
+        kv(
+            &mut out,
+            "Started",
+            format!("{}  ({ago} ago)", fmt::local_time(t)),
+        );
     }
     if let Some(t) = sim.last_update() {
         let ago = fmt::duration((now - t).num_seconds() as f64);
@@ -153,7 +170,11 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             .update_interval
             .map(|i| format!(", every {}", fmt::duration(i)))
             .unwrap_or_default();
-        kv(&mut out, "Updated", format!("{}  ({ago} ago{every})", fmt::local_time(t)));
+        kv(
+            &mut out,
+            "Updated",
+            format!("{}  ({ago} ago{every})", fmt::local_time(t)),
+        );
     }
 
     let summary = sim.summary();
@@ -225,7 +246,12 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
 
     let r = &st.resources;
     let mut res = Vec::new();
-    for (k, v) in [("Nodes", r.nodes), ("Tasks", r.tasks), ("Threads", r.threads), ("GPUs", r.gpus)] {
+    for (k, v) in [
+        ("Nodes", r.nodes),
+        ("Tasks", r.tasks),
+        ("Threads", r.threads),
+        ("GPUs", r.gpus),
+    ] {
         if let Some(v) = v {
             res.push((k, v.to_string()));
         }
@@ -303,7 +329,11 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             }
             if let Some(chi) = &b.spin {
                 if chi.len() > 1 {
-                    parts.push(format!("χ {} |χ| {}", fmt::vector(chi), fmt::num(fmt::norm(chi))));
+                    parts.push(format!(
+                        "χ {} |χ| {}",
+                        fmt::vector(chi),
+                        fmt::num(fmt::norm(chi))
+                    ));
                 } else {
                     parts.push(format!("χ {}", fmt::vector(chi)));
                 }
@@ -326,8 +356,16 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     if !st.images.is_empty() {
         section(&mut out, "Images");
         for (i, img) in st.images.iter().enumerate() {
-            let title = img.title.as_deref().map(|t| format!("  {t}")).unwrap_or_default();
-            kv(&mut out, &format!("{}", i + 1), format!("{}{title}", img.file));
+            let title = img
+                .title
+                .as_deref()
+                .map(|t| format!("  {t}"))
+                .unwrap_or_default();
+            kv(
+                &mut out,
+                &format!("{}", i + 1),
+                format!("{}{title}", img.file),
+            );
         }
     }
 

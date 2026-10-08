@@ -139,7 +139,8 @@ pub fn query(program: &str, timeout: Duration) -> Result<Snapshot, QueryError> {
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_default();
     let mut cmd = Command::new(program);
-    cmd.arg("--noheader").arg(format!("--format={SQUEUE_FORMAT}"));
+    cmd.arg("--noheader")
+        .arg(format!("--format={SQUEUE_FORMAT}"));
     if user.is_empty() {
         cmd.arg("--me");
     } else {

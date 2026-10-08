@@ -134,7 +134,11 @@ mod tests {
         assert!(load_image(d, "wide.png").unwrap_err().contains("pixels"));
         assert!(load_image(d, "big.png").unwrap_err().contains("KiB"));
         assert!(load_image(d, "junk.png").is_err());
-        assert!(load_image(d, "missing.png").unwrap_err().contains("missing"));
+        assert!(
+            load_image(d, "missing.png")
+                .unwrap_err()
+                .contains("missing")
+        );
         assert!(load_image(d, "../small.png").is_err());
     }
 }

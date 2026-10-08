@@ -227,8 +227,17 @@ pub fn summary_text(sim: &Sim) -> String {
         .summary()
         .iter()
         .map(|it| {
-            let unit = it.value.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
-            let arrow = it.history.and_then(trend).map(String::from).unwrap_or_default();
+            let unit = it
+                .value
+                .unit
+                .as_deref()
+                .map(|u| format!(" {u}"))
+                .unwrap_or_default();
+            let arrow = it
+                .history
+                .and_then(trend)
+                .map(String::from)
+                .unwrap_or_default();
             format!("{} {}{unit}{arrow}", it.label, fmt::value(&it.value.value))
         })
         .collect();
@@ -244,13 +253,12 @@ pub fn text(
 ) -> String {
     let cols = columns(rows.iter().map(|(i, _)| &sims[*i]));
     let mut table: Vec<Vec<String>> = vec![cols.iter().map(|c| c.header().to_string()).collect()];
-    table.extend(
-        rows.iter()
-            .map(|(i, h)| {
-                let sim = &sims[*i];
-                cols.iter().map(|c| cell(*c, sim, *h, now, snaps.get(&sim.host))).collect()
-            }),
-    );
+    table.extend(rows.iter().map(|(i, h)| {
+        let sim = &sims[*i];
+        cols.iter()
+            .map(|c| cell(*c, sim, *h, now, snaps.get(&sim.host)))
+            .collect()
+    }));
     let mut width = vec![0usize; cols.len()];
     for row in &table {
         for (w, c) in width.iter_mut().zip(row) {

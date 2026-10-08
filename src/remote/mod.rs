@@ -236,7 +236,9 @@ pub fn read_magic(r: &mut impl BufRead) -> Result<(), MagicError> {
             };
         }
     }
-    Err(MagicError::Other("unexpected output instead of simwatch --serve".into()))
+    Err(MagicError::Other(
+        "unexpected output instead of simwatch --serve".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -268,7 +270,10 @@ mod tests {
         for m in &msgs {
             assert_eq!(read_msg::<FromServer>(&mut r).unwrap().as_ref(), Some(m));
         }
-        assert_eq!(read_msg::<FromServer>(&mut r).unwrap(), Some(FromServer::Unknown));
+        assert_eq!(
+            read_msg::<FromServer>(&mut r).unwrap(),
+            Some(FromServer::Unknown)
+        );
         assert_eq!(read_msg::<FromServer>(&mut r).unwrap(), None);
 
         // Truncated and over-long lines
@@ -282,10 +287,16 @@ mod tests {
 
     #[test]
     fn magic() {
-        let ok = format!("Welcome to the cluster!\n\n{}\n{{\"type\":\"done\"}}\n", magic_line());
+        let ok = format!(
+            "Welcome to the cluster!\n\n{}\n{{\"type\":\"done\"}}\n",
+            magic_line()
+        );
         let mut r = Cursor::new(ok.into_bytes());
         assert_eq!(read_magic(&mut r), Ok(()));
-        assert_eq!(read_msg::<FromServer>(&mut r).unwrap(), Some(FromServer::Done));
+        assert_eq!(
+            read_msg::<FromServer>(&mut r).unwrap(),
+            Some(FromServer::Done)
+        );
 
         let mut r = Cursor::new(b"motd\n".to_vec());
         assert_eq!(read_magic(&mut r), Err(MagicError::NoAnswer));

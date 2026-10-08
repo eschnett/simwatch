@@ -25,6 +25,7 @@ values, resubmitted jobs.
 ```bash
 cargo build --release
 cargo test
+cargo fmt                           # default rustfmt; CI checks it
 cargo clippy --all-targets          # must be warning-free
 cargo run -- --print DIR            # one-shot plain-text list, no TTY needed
 cargo run --example fake_sims -- DIR [--once]   # demo simulations in every state
@@ -75,7 +76,7 @@ julia writers/julia/runtests.jl     # tests of the Julia writer
   and CODE.md.
 - A new key binding goes into `handle_key` in `src/ui/mod.rs`, the help
   overlay (`src/ui/help.rs`), and README.md.
-- Code style: match the surrounding code; short doc comments on items,
+- Code style: `cargo fmt`, and match the surrounding code; short doc comments on items,
   comments only where the reason is not obvious. Tests live in `#[cfg(test)]`
   modules next to the code.
 - Do not call `Terminal::clear()`, and do not use

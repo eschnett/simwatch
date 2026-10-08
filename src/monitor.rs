@@ -95,7 +95,11 @@ impl Monitor {
             match source {
                 None => local = Some(Local::start(cfg, out)),
                 Some(host) => {
-                    let remote = cfg.remotes.iter().find(|r| r.host == host).expect("known host");
+                    let remote = cfg
+                        .remotes
+                        .iter()
+                        .find(|r| r.host == host)
+                        .expect("known host");
                     remotes.push(Client::start(cfg, remote, out));
                 }
             }
@@ -132,8 +136,11 @@ impl Monitor {
 
     /// Fetches images from remote hosts, for the image loader
     pub fn image_fetch(&self) -> Fetch {
-        let fetchers: Vec<(String, client::Fetcher)> =
-            self.remotes.iter().map(|c| (c.host.clone(), c.fetcher())).collect();
+        let fetchers: Vec<(String, client::Fetcher)> = self
+            .remotes
+            .iter()
+            .map(|c| (c.host.clone(), c.fetcher()))
+            .collect();
         Box::new(move |host, dir, file| {
             let (_, f) = fetchers
                 .iter()
@@ -211,7 +218,9 @@ fn fs_worker(cfg: Config, rx: Receiver<Request>, out: Out) {
                 return;
             }
         }
-        let wait = next_scan.min(next_read).saturating_duration_since(Instant::now());
+        let wait = next_scan
+            .min(next_read)
+            .saturating_duration_since(Instant::now());
         match rx.recv_timeout(wait) {
             Ok(r) => pending = Some(r),
             Err(RecvTimeoutError::Timeout) => {}
@@ -450,7 +459,10 @@ mod tests {
         mon.request(Request::Rescan);
         let mut rescanned = false;
         while !rescanned && Instant::now() < deadline {
-            rescanned = matches!(rx.recv_timeout(Duration::from_secs(1)), Ok((_, Update::ScanFinished(_))));
+            rescanned = matches!(
+                rx.recv_timeout(Duration::from_secs(1)),
+                Ok((_, Update::ScanFinished(_)))
+            );
         }
         assert!(rescanned);
     }

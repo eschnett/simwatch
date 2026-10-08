@@ -171,7 +171,11 @@ pub fn read_status_text(path: &Path) -> Result<String, String> {
 pub fn parse_status(text: &str) -> Result<Status, String> {
     let mut table: Table = text.parse().map_err(|e: toml::de::Error| {
         // Keep only the first line; TOML errors include a multi-line excerpt
-        e.message().lines().next().unwrap_or("parse error").to_string()
+        e.message()
+            .lines()
+            .next()
+            .unwrap_or("parse error")
+            .to_string()
     })?;
     Ok(status_from_table(&mut table))
 }
@@ -249,7 +253,9 @@ fn status_from_table(t: &mut Table) -> Status {
             };
             let mut rest = Vec::new();
             for v in arr {
-                let Value::Table(mut b) = v else { unreachable!() };
+                let Value::Table(mut b) = v else {
+                    unreachable!()
+                };
                 st.black_holes.push(BlackHole {
                     name: take_string(&mut b, "name"),
                     mass: take_number(&mut b, "mass"),
@@ -260,7 +266,10 @@ fn status_from_table(t: &mut Table) -> Status {
                 });
                 rest.push(Value::Table(b));
             }
-            if rest.iter().any(|v| v.as_table().is_some_and(|b| !b.is_empty())) {
+            if rest
+                .iter()
+                .any(|v| v.as_table().is_some_and(|b| !b.is_empty()))
+            {
                 t.insert("black_holes".into(), Value::Array(rest));
             }
         }
@@ -490,9 +499,7 @@ pub fn as_time(v: &Value) -> Option<DateTime<Utc>> {
         Value::Datetime(d) => parse_time_str(&d.to_string()),
         Value::String(s) => parse_time_str(s.trim()),
         Value::Integer(i) => Utc.timestamp_opt(*i, 0).single(),
-        Value::Float(f) if f.is_finite() => {
-            Utc.timestamp_millis_opt((f * 1000.0) as i64).single()
-        }
+        Value::Float(f) if f.is_finite() => Utc.timestamp_millis_opt((f * 1000.0) as i64).single(),
         _ => None,
     }
 }
@@ -558,7 +565,10 @@ coeffs = [1, 2, 3]
         .unwrap();
         assert_eq!(st.name.as_deref(), Some("bbh"));
         assert_eq!(st.status.as_deref(), Some("running"));
-        assert_eq!(st.updated.unwrap().to_rfc3339(), "2026-10-02T15:35:00+00:00");
+        assert_eq!(
+            st.updated.unwrap().to_rfc3339(),
+            "2026-10-02T15:35:00+00:00"
+        );
         assert_eq!(st.update_interval, Some(60.0));
         assert_eq!(st.pid, Some(42));
         assert_eq!(st.progress.iteration, Some(100));
@@ -618,7 +628,10 @@ ham_l2 = [1e-6, 2e-6, 4e-6]
         assert_eq!(st.progress.fraction, Some(0.25));
         assert_eq!(st.slurm.previous_job_ids, ["100", "200"]);
         assert_eq!(st.history.time, Some(vec![1.0, 2.0, 3.0]));
-        assert_eq!(st.history.get("shells.r2.ham_l2"), Some(&[1e-6, 2e-6, 4e-6][..]));
+        assert_eq!(
+            st.history.get("shells.r2.ham_l2"),
+            Some(&[1e-6, 2e-6, 4e-6][..])
+        );
         assert!(st.history.get("plain").unwrap()[2].is_nan());
         assert!(st.history.get("note").is_none());
 
@@ -626,7 +639,11 @@ ham_l2 = [1e-6, 2e-6, 4e-6]
         let value = |k: &str| st.values.iter().find(|e| e.key == k).map(|e| &e.value);
         assert_eq!(value("progress.iteration").and_then(as_number), Some(7.0));
         assert_eq!(value("shells.r2.ham_l2").and_then(as_number), Some(1.5e-6));
-        assert!(st.values.iter().all(|e| !e.key.starts_with("history") && e.key != "summary"));
+        assert!(
+            st.values
+                .iter()
+                .all(|e| !e.key.starts_with("history") && e.key != "summary")
+        );
 
         // What is not a series stays visible
         let keys: Vec<&str> = st.extra.iter().map(|e| e.key.as_str()).collect();

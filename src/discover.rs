@@ -55,7 +55,9 @@ pub fn scan(roots: &[PathBuf], limits: &Limits) -> ScanResult {
                     queue.push_back((r, 0));
                 }
             }
-            Ok(_) => res.warnings.push(format!("{}: not a directory", root.display())),
+            Ok(_) => res
+                .warnings
+                .push(format!("{}: not a directory", root.display())),
             Err(e) => res.warnings.push(format!("{}: {e}", root.display())),
         }
     }
@@ -76,8 +78,10 @@ pub fn scan(roots: &[PathBuf], limits: &Limits) -> ScanResult {
             break;
         }
         if res.sims.len() >= limits.max_sims {
-            res.warnings
-                .push(format!("stopped after {} simulations (max_sims)", limits.max_sims));
+            res.warnings.push(format!(
+                "stopped after {} simulations (max_sims)",
+                limits.max_sims
+            ));
             break;
         }
         res.dirs_visited += 1;
@@ -137,9 +141,12 @@ fn skip(name: &str, limits: &Limits) -> bool {
 pub fn confined_path(sim_dir: &Path, file: &str) -> Option<PathBuf> {
     let rel = Path::new(file);
     if file.is_empty()
-        || !rel
-            .components()
-            .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+        || !rel.components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
     {
         return None;
     }
@@ -239,7 +246,10 @@ mod tests {
 
     #[test]
     fn missing_root() {
-        let res = scan(&[PathBuf::from("/nonexistent/simwatch")], &Limits::default());
+        let res = scan(
+            &[PathBuf::from("/nonexistent/simwatch")],
+            &Limits::default(),
+        );
         assert!(res.sims.is_empty());
         assert_eq!(res.warnings.len(), 1);
     }

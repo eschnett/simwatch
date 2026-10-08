@@ -107,7 +107,9 @@ pub fn norm(v: &[f64]) -> f64 {
 }
 
 pub fn local_time(t: DateTime<Utc>) -> String {
-    t.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string()
+    t.with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 /// A generic TOML value, without quotes around strings
@@ -141,7 +143,9 @@ pub fn wants_log(values: &[f64]) -> bool {
     let finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
     let (min, max) = finite
         .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(*v), b.max(*v)));
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
     !finite.is_empty() && min > 0.0 && max / min > 100.0
 }
 
@@ -163,7 +167,9 @@ pub fn sparkline(values: &[f64], width: usize, log: bool) -> String {
     let (min, max) = pick
         .iter()
         .filter(|v| v.is_finite())
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(*v), b.max(*v)));
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
     pick.iter()
         .map(|v| {
             if !v.is_finite() {
@@ -233,7 +239,10 @@ mod tests {
 
     #[test]
     fn sparklines() {
-        assert_eq!(sparkline(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], 8, false), "▁▂▃▄▅▆▇█");
+        assert_eq!(
+            sparkline(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], 8, false),
+            "▁▂▃▄▅▆▇█"
+        );
         assert_eq!(sparkline(&[1.0, f64::NAN, 1.0], 8, false), "▄ ▄");
         assert_eq!(sparkline(&[], 8, false), "");
         let exp: Vec<f64> = (0..100).map(|i| 10f64.powi(i / 10)).collect();

@@ -41,7 +41,10 @@ pub fn draw(f: &mut Frame, area: Rect) {
         (Health::Running, "status file is fresh"),
         (Health::Queued, "waiting in the Slurm queue"),
         (Health::Stale, "status file has not been updated in a while"),
-        (Health::Lost, "Slurm job is gone, but the simulation did not say it ended"),
+        (
+            Health::Lost,
+            "Slurm job is gone, but the simulation did not say it ended",
+        ),
         (Health::Stopped, "stopped, e.g. at the wall time limit"),
         (Health::Finished, "finished"),
         (Health::Failed, "the simulation reported a failure"),
@@ -49,13 +52,20 @@ pub fn draw(f: &mut Frame, area: Rect) {
     ];
     for (h, d) in states {
         lines.push(Line::from(vec![
-            Span::styled(format!(" {} {:<12}", h.glyph(), h.label()), super::health_style(h)),
+            Span::styled(
+                format!(" {} {:<12}", h.glyph(), h.label()),
+                super::health_style(h),
+            ),
             Span::raw(d).dim(),
         ]));
     }
     let height = lines.len() as u16 + 2;
-    let [v] = Layout::vertical([Constraint::Length(height)]).flex(Flex::Center).areas(area);
-    let [r] = Layout::horizontal([Constraint::Length(76)]).flex(Flex::Center).areas(v);
+    let [v] = Layout::vertical([Constraint::Length(height)])
+        .flex(Flex::Center)
+        .areas(area);
+    let [r] = Layout::horizontal([Constraint::Length(76)])
+        .flex(Flex::Center)
+        .areas(v);
     f.render_widget(Clear, r);
     f.render_widget(
         Paragraph::new(lines).block(
