@@ -57,7 +57,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned, so that new lints in a new Rust release do not fail CI by
+      # surprise; update it deliberately
+      - uses: dtolnay/rust-toolchain@1.99
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2

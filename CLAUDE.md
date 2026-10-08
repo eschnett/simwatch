@@ -26,7 +26,7 @@ values, resubmitted jobs.
 cargo build --release
 cargo test
 cargo fmt                           # default rustfmt; CI checks it
-cargo clippy --all-targets          # must be warning-free
+cargo +1.99 clippy --all-targets    # must be warning-free; CI pins this version
 cargo run -- --print DIR            # one-shot plain-text list, no TTY needed
 cargo run --example fake_sims -- DIR [--once]   # demo simulations in every state
 cargo run -- DIR                    # interactive (needs a real terminal)
