@@ -7,7 +7,7 @@ mod help;
 pub mod list;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -23,9 +23,10 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::config::Config;
-use crate::images::{ImageKey, Loader};
-use crate::model::{Health, Sim, health};
-use crate::monitor::{Monitor, Request, Update};
+use crate::images::{Fetch, ImageKey, Loader};
+use crate::model::{Health, Sim, SimId, health};
+use crate::monitor::{Monitor, Request, Tagged, Update};
+use crate::remote::client::TUI_ACTIVE;
 use crate::slurm::Snapshot;
 
 /// Manual refreshes are rate-limited to one per this interval
@@ -100,8 +101,12 @@ struct ImageEntry {
     state: ImageState,
 }
 
-pub struct App {
-    pub cfg: Config,
+/// What the UI knows about one source of simulations: the local
+/// directories, or a remote host
+#[derive(Default)]
+pub struct Source {
+    /// The remote host, or `None` for local directories
+    pub host: Option<String>,
     pub sims: Vec<Sim>,
     pub slurm: Option<Snapshot>,
     pub slurm_error: Option<String>,
@@ -111,10 +116,32 @@ pub struct App {
     pub squeue: Activity,
     pub scan_warnings: Vec<String>,
     pub scan_dirs: usize,
+    /// Why a remote host is not connected
+    pub disconnected: Option<String>,
+    /// The latest problem a remote host reported
+    pub warning: Option<String>,
+}
+
+impl Source {
+    pub fn name(&self) -> &str {
+        self.host.as_deref().unwrap_or("local")
+    }
+
+    fn busy(&self) -> bool {
+        self.scan.busy.is_some() || self.read.busy.is_some() || self.squeue.busy.is_some()
+    }
+}
+
+pub struct App {
+    pub cfg: Config,
+    /// The simulations of all sources
+    pub sims: Vec<Sim>,
+    /// In the order of `Config::sources`
+    pub sources: Vec<Source>,
 
     pub view: View,
     pub detail: bool,
-    pub selected: Option<PathBuf>,
+    pub selected: Option<SimId>,
     pub hide_done: bool,
     pub sort: Sort,
     pub filter: String,
@@ -133,23 +160,27 @@ pub struct App {
     last_rescan: Option<Instant>,
     notice: Option<(String, Instant)>,
     needs_clear: bool,
+    /// Reconnect lost hosts, with the terminal released for passwords
+    reconnect: bool,
     quit: bool,
 }
 
 impl App {
-    pub fn new(cfg: Config, picker: Option<Picker>) -> App {
-        let loader = picker.as_ref().map(|_| Loader::start());
+    /// `fetch` gets image files from remote hosts
+    pub fn new(cfg: Config, picker: Option<Picker>, fetch: Fetch) -> App {
+        let loader = picker.is_some().then(|| Loader::start(fetch));
+        let sources = cfg
+            .sources()
+            .into_iter()
+            .map(|host| Source {
+                host,
+                ..Source::default()
+            })
+            .collect();
         App {
             cfg,
             sims: Vec::new(),
-            slurm: None,
-            slurm_error: None,
-            slurm_disabled: None,
-            scan: Activity::default(),
-            read: Activity::default(),
-            squeue: Activity::default(),
-            scan_warnings: Vec::new(),
-            scan_dirs: 0,
+            sources,
             view: View::List,
             detail: false,
             selected: None,
@@ -169,44 +200,63 @@ impl App {
             last_rescan: None,
             notice: None,
             needs_clear: false,
+            reconnect: false,
             quit: false,
         }
     }
 
-    pub fn apply(&mut self, u: Update) {
+    pub fn apply(&mut self, (source, u): Tagged) {
+        let Some(src) = self.sources.get_mut(source) else {
+            return;
+        };
         match u {
-            Update::ScanStarted => self.scan.start(),
+            Update::ScanStarted => src.scan.start(),
             Update::ScanFinished(res) => {
-                self.scan.finish();
-                self.scan_warnings = res.warnings;
-                self.scan_dirs = res.dirs_visited;
+                src.scan.finish();
+                src.scan_warnings = res.warnings;
+                src.scan_dirs = res.dirs_visited;
             }
-            Update::ReadStarted => self.read.start(),
+            Update::ReadStarted => src.read.start(),
             Update::Sims(sims) => {
-                self.read.finish();
-                self.sims = sims;
+                src.read.finish();
+                src.sims = sims;
+                self.sims = self.sources.iter().flat_map(|s| s.sims.iter().cloned()).collect();
             }
-            Update::SlurmStarted => self.squeue.start(),
+            Update::SlurmStarted => src.squeue.start(),
             Update::Slurm(r) => {
-                self.squeue.finish();
+                src.squeue.finish();
                 match r {
                     Ok(s) => {
-                        self.slurm = Some(s);
-                        self.slurm_error = None;
+                        src.slurm = Some(s);
+                        src.slurm_error = None;
                     }
                     // Keep the previous snapshot; its age is shown
-                    Err(e) => self.slurm_error = Some(e),
+                    Err(e) => src.slurm_error = Some(e),
                 }
             }
             Update::SlurmDisabled(why) => {
-                self.squeue.busy = None;
-                self.slurm_disabled = Some(why);
+                src.squeue.busy = None;
+                src.slurm_disabled = Some(why);
             }
+            Update::Connected => src.disconnected = None,
+            Update::Disconnected(why) => {
+                // Nothing is running on the other side any more
+                src.scan.busy = None;
+                src.read.busy = None;
+                src.squeue.busy = None;
+                src.disconnected = Some(why);
+            }
+            Update::Warning(w) => src.warning = Some(w),
         }
     }
 
+    /// The Slurm snapshot of a simulation's host
+    pub fn snap(&self, sim: &Sim) -> Option<&Snapshot> {
+        self.sources.iter().find(|s| s.host == sim.host)?.slurm.as_ref()
+    }
+
     pub fn health(&self, sim: &Sim) -> Health {
-        health(sim, Utc::now(), self.slurm.as_ref(), &self.cfg.health)
+        health(sim, Utc::now(), self.snap(sim), &self.cfg.health)
     }
 
     /// Indices into `sims` of the shown simulations, in display order
@@ -222,7 +272,7 @@ impl App {
                 filter.is_empty() || {
                     let s = &self.sims[*i];
                     s.display_name().to_lowercase().contains(&filter)
-                        || s.dir.to_string_lossy().to_lowercase().contains(&filter)
+                        || s.location().to_lowercase().contains(&filter)
                         || s.st().group.as_ref().is_some_and(|g| g.to_lowercase().contains(&filter))
                 }
             })
@@ -262,7 +312,7 @@ impl App {
         let pos = self
             .selected
             .as_ref()
-            .and_then(|d| visible.iter().position(|(i, _)| &self.sims[*i].dir == d));
+            .and_then(|d| visible.iter().position(|(i, _)| self.sims[*i].is(d)));
         Some(pos.unwrap_or(0))
     }
 
@@ -278,13 +328,13 @@ impl App {
             return;
         };
         let new = (pos as isize + delta).clamp(0, vis.len() as isize - 1) as usize;
-        let dir = self.sims[vis[new].0].dir.clone();
-        if self.detail && self.selected.as_ref() != Some(&dir) {
+        let id = self.sims[vis[new].0].id();
+        if self.detail && self.selected.as_ref() != Some(&id) {
             self.detail_scroll = 0;
             self.image_idx = 0;
             self.needs_clear = true;
         }
-        self.selected = Some(dir);
+        self.selected = Some(id);
     }
 
     fn page(&self) -> isize {
@@ -356,6 +406,13 @@ impl App {
             }
             KeyCode::Char('r') => self.manual(monitor, Request::Reread),
             KeyCode::Char('R') => self.manual(monitor, Request::Rescan),
+            KeyCode::Char('c') => {
+                if monitor.any_disconnected() {
+                    self.reconnect = true;
+                } else {
+                    self.notify("all hosts are connected");
+                }
+            }
             KeyCode::Char('f') => {
                 self.hide_done = !self.hide_done;
                 self.notify(if self.hide_done {
@@ -439,7 +496,7 @@ impl App {
             self.detail_scroll = 0;
             self.image_idx = 0;
             // Pin the selection so that it survives re-sorting
-            self.selected = self.selected_sim().map(|s| s.dir.clone());
+            self.selected = self.selected_sim().map(|s| s.id());
         }
         if !detail {
             // Only images of the simulation being looked at are kept
@@ -454,8 +511,8 @@ impl App {
     }
 
     /// The image state for an image of a simulation, requesting it if needed
-    pub fn image(&mut self, sim_dir: &Path, version: Option<SystemTime>, file: &str) -> &mut ImageState {
-        let key: ImageKey = (sim_dir.to_path_buf(), file.to_string());
+    pub fn image(&mut self, sim: SimId, version: Option<SystemTime>, file: &str) -> &mut ImageState {
+        let key: ImageKey = (sim, file.to_string());
         let loader = self.loader.as_ref();
         let entry = self.images.entry(key.clone()).or_insert_with(|| {
             if let Some(l) = loader {
@@ -505,7 +562,7 @@ impl App {
     }
 
     fn busy(&self) -> bool {
-        self.scan.busy.is_some() || self.read.busy.is_some() || self.squeue.busy.is_some()
+        self.sources.iter().any(Source::busy)
     }
 
     fn draw(&mut self, f: &mut Frame) {
@@ -560,48 +617,43 @@ impl App {
     }
 
     fn draw_status(&self, f: &mut Frame, area: Rect) {
-        let spin = SPINNER[(START.elapsed().as_millis() / 100) as usize % SPINNER.len()];
-        let activity = |name: &str, a: &Activity| -> Span<'static> {
-            match (a.busy, a.done) {
-                (Some(t), _) if name == "scan" && t.elapsed() > SLOW_SCAN => Span::styled(
-                    format!("{spin} {name} slow ({})", fmt::age(t.elapsed().as_secs_f64())),
-                    Style::new().fg(Color::Yellow).bold(),
-                ),
-                (Some(_), _) => {
-                    Span::styled(format!("{spin} {name}"), Style::new().fg(Color::Cyan).bold())
-                }
-                (None, Some(t)) => Span::raw(format!(
-                    "{name} {} ago",
-                    fmt::age(t.elapsed().as_secs_f64())
-                ))
-                .dim(),
-                (None, None) => Span::raw(format!("{name} –")).dim(),
-            }
-        };
         let sep = || Span::raw(" │ ").dim();
-        let mut spans = vec![activity("scan", &self.scan), sep(), activity("read", &self.read), sep()];
-        if let Some(why) = &self.slurm_disabled {
-            spans.push(Span::raw(format!("squeue off ({why})")).dim());
-        } else {
-            spans.push(activity("squeue", &self.squeue));
-            if let Some(s) = &self.slurm {
-                spans.push(
-                    Span::raw(format!(
-                        ": {} R, {} PD",
-                        s.count("RUNNING"),
-                        s.count("PENDING")
-                    ))
-                    .dim(),
-                );
+        // Only the local directories: no need to name them
+        let named = self.sources.len() > 1 || self.sources.iter().any(|s| s.host.is_some());
+        let compact = self.sources.len() > 1;
+        let mut spans = Vec::new();
+        let mut warnings = Vec::new();
+        for src in &self.sources {
+            if !spans.is_empty() {
+                spans.push(sep());
             }
-            if let Some(e) = &self.slurm_error {
-                spans.push(Span::styled(format!(" ({e})"), Style::new().fg(Color::Red)));
+            if named {
+                spans.push(Span::raw(format!("{}: ", src.name())).bold());
             }
+            if let Some(why) = &src.disconnected {
+                spans.push(Span::styled(
+                    format!("disconnected ({}), c reconnects", fmt::trunc(why, 40)),
+                    Style::new().fg(Color::Red),
+                ));
+                continue;
+            }
+            if compact {
+                spans.extend(source_compact(src));
+            } else {
+                spans.extend(source_full(src));
+            }
+            let prefix = if compact { format!("{}: ", src.name()) } else { String::new() };
+            warnings.extend(
+                src.scan_warnings
+                    .iter()
+                    .chain(&src.warning)
+                    .map(|w| format!("{prefix}{w}")),
+            );
         }
-        if !self.scan_warnings.is_empty() {
+        if !warnings.is_empty() {
             spans.push(sep());
             spans.push(Span::styled(
-                fmt::trunc(&self.scan_warnings.join("; "), 60),
+                fmt::trunc(&warnings.join("; "), 60),
                 Style::new().fg(Color::Yellow),
             ));
         }
@@ -630,6 +682,80 @@ impl App {
 
 static START: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
 
+fn spinner() -> &'static str {
+    SPINNER[(START.elapsed().as_millis() / 100) as usize % SPINNER.len()]
+}
+
+/// Activity of one source: spinners while busy, else how long ago
+fn source_full(src: &Source) -> Vec<Span<'static>> {
+    let spin = spinner();
+    let activity = |name: &str, a: &Activity| -> Span<'static> {
+        match (a.busy, a.done) {
+            (Some(t), _) if name == "scan" && t.elapsed() > SLOW_SCAN => Span::styled(
+                format!("{spin} {name} slow ({})", fmt::age(t.elapsed().as_secs_f64())),
+                Style::new().fg(Color::Yellow).bold(),
+            ),
+            (Some(_), _) => {
+                Span::styled(format!("{spin} {name}"), Style::new().fg(Color::Cyan).bold())
+            }
+            (None, Some(t)) => Span::raw(format!(
+                "{name} {} ago",
+                fmt::age(t.elapsed().as_secs_f64())
+            ))
+            .dim(),
+            (None, None) => Span::raw(format!("{name} –")).dim(),
+        }
+    };
+    let sep = || Span::raw(" │ ").dim();
+    let mut spans = vec![activity("scan", &src.scan), sep(), activity("read", &src.read), sep()];
+    if let Some(why) = &src.slurm_disabled {
+        spans.push(Span::raw(format!("squeue off ({why})")).dim());
+    } else {
+        spans.push(activity("squeue", &src.squeue));
+        if let Some(s) = &src.slurm {
+            spans.push(
+                Span::raw(format!(
+                    ": {} R, {} PD",
+                    s.count("RUNNING"),
+                    s.count("PENDING")
+                ))
+                .dim(),
+            );
+        }
+        if let Some(e) = &src.slurm_error {
+            spans.push(Span::styled(format!(" ({e})"), Style::new().fg(Color::Red)));
+        }
+    }
+    spans
+}
+
+/// Activity of one of several sources, in a few characters
+fn source_compact(src: &Source) -> Vec<Span<'static>> {
+    let busy: Vec<&str> = [("scan", &src.scan), ("read", &src.read), ("squeue", &src.squeue)]
+        .into_iter()
+        .filter(|(_, a)| a.busy.is_some())
+        .map(|(n, _)| n)
+        .collect();
+    let mut spans = vec![if !busy.is_empty() {
+        Span::styled(
+            format!("{} {}", spinner(), busy.join(" ")),
+            Style::new().fg(Color::Cyan).bold(),
+        )
+    } else {
+        match src.read.done {
+            Some(t) => Span::raw(format!("read {} ago", fmt::age(t.elapsed().as_secs_f64()))).dim(),
+            None => Span::raw("–").dim(),
+        }
+    }];
+    if let Some(s) = &src.slurm {
+        spans.push(Span::raw(format!(", {} R {} PD", s.count("RUNNING"), s.count("PENDING"))).dim());
+    }
+    if src.slurm_error.is_some() {
+        spans.push(Span::styled(" (squeue failed)", Style::new().fg(Color::Red)));
+    }
+    spans
+}
+
 pub fn health_style(h: Health) -> Style {
     match h {
         Health::Running => Style::new().fg(Color::Green),
@@ -655,8 +781,25 @@ fn full_clear(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Give the terminal back for ssh to ask for passwords, reconnect lost hosts,
+/// and take the terminal again
+fn reconnect(terminal: &mut DefaultTerminal, monitor: &Monitor) -> Result<()> {
+    use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+    TUI_ACTIVE.store(false, Ordering::Relaxed);
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(std::io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
+    eprintln!("simwatch: reconnecting (Ctrl-C quits)");
+    monitor.reconnect();
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(std::io::stdout(), EnterAlternateScreen)?;
+    TUI_ACTIVE.store(true, Ordering::Relaxed);
+    terminal.hide_cursor()?;
+    full_clear(terminal)?;
+    Ok(())
+}
+
 /// Run the interactive UI until the user quits
-pub fn run(terminal: &mut DefaultTerminal, mut app: App, rx: Receiver<Update>, monitor: Monitor) -> Result<()> {
+pub fn run(terminal: &mut DefaultTerminal, mut app: App, rx: Receiver<Tagged>, monitor: Monitor) -> Result<()> {
     let _ = *START;
     let mut last_draw = Instant::now() - Duration::from_secs(10);
     let mut dirty = true;
@@ -698,6 +841,10 @@ pub fn run(terminal: &mut DefaultTerminal, mut app: App, rx: Receiver<Update>, m
             }
             dirty = true;
         }
+        if app.reconnect {
+            app.reconnect = false;
+            reconnect(terminal, &monitor)?;
+        }
         if app.quit {
             return Ok(());
         }
@@ -709,6 +856,7 @@ mod tests {
     use super::*;
     use crate::format::parse_status;
     use image::{Rgb, RgbImage};
+    use std::path::Path;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui_image::picker::ProtocolType;
@@ -734,7 +882,7 @@ mod tests {
     }
 
     fn app(dir: &Path, picker: Option<Picker>) -> App {
-        let mut app = App::new(Config::default(), picker);
+        let mut app = App::new(Config::default(), picker, Box::new(|_, _, _| Err("no".into())));
         let now = Utc::now().to_rfc3339();
         app.sims = vec![
             sim(
@@ -763,8 +911,8 @@ title = "Tracks"
             ),
             sim(&dir.join("b"), "status = \"finished\"\niteration = 7"),
         ];
-        app.scan.finish();
-        app.read.finish();
+        app.sources[0].scan.finish();
+        app.sources[0].read.finish();
         app
     }
 
@@ -789,7 +937,7 @@ title = "Tracks"
         assert!(cards.contains("mystery=42"));
 
         app.view = View::List;
-        app.selected = Some(tmp.path().join("b"));
+        app.selected = Some((None, tmp.path().join("b")));
         app.set_view(View::List, true);
         let detail = render(&mut app);
         assert!(detail.contains("(missing simulation name)"), "{detail}");
@@ -840,7 +988,7 @@ time = [1, 2, 3, 4]
         assert!(cards.contains("ham_l2 4e-6 ▁"), "{cards}");
 
         app.view = View::List;
-        app.selected = Some(tmp.path().join("c"));
+        app.selected = Some((None, tmp.path().join("c")));
         app.set_view(View::List, true);
         let detail = render(&mut app);
         assert!(detail.contains("Summary"), "{detail}");
@@ -868,7 +1016,7 @@ time = [1, 2, 3, 4]
         let mut picker = Picker::halfblocks();
         picker.set_protocol_type(ProtocolType::Sixel);
         let mut app = app(tmp.path(), Some(picker));
-        app.selected = Some(tmp.path().join("a"));
+        app.selected = Some((None, tmp.path().join("a")));
         app.set_view(View::List, true);
 
         let first = render(&mut app);

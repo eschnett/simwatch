@@ -10,7 +10,7 @@ use ratatui_image::{Resize, StatefulImage};
 
 use super::{App, ImageState, cards, fmt, health_style};
 use crate::format::{STATUS_FILE, Status};
-use crate::model::{Sim, growth_rate};
+use crate::model::{Sim, growth_rate, location};
 use crate::slurm::Snapshot;
 
 const KEY_WIDTH: usize = 15;
@@ -21,7 +21,7 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         return;
     };
     let h = app.health(&sim);
-    let lines = lines(&sim, app.slurm.as_ref(), app.health(&sim));
+    let lines = lines(&sim, app.snap(&sim), h);
     let images = &sim.st().images;
     let show_images = app.images_enabled() && !images.is_empty() && area.width >= 60;
 
@@ -71,7 +71,7 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         if let Some(d) = &img.description {
             f.render_widget(Paragraph::new(d.as_str()).wrap(Wrap { trim: true }).dim(), desc);
         }
-        match app.image(&sim.dir, sim.mtime, &img.file) {
+        match app.image(sim.id(), sim.mtime, &img.file) {
             ImageState::Loading => {
                 f.render_widget(Paragraph::new("loading…").dim(), pic);
             }
@@ -117,7 +117,7 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
         "Name",
         st.name.clone().unwrap_or_else(|| "(missing simulation name)".into()),
     );
-    kv(&mut out, "Directory", sim.dir.display().to_string());
+    kv(&mut out, "Directory", sim.location());
     let mut state = h.label().to_string();
     if let Some(s) = &st.status {
         if !s.eq_ignore_ascii_case(h.label()) {
@@ -392,7 +392,7 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     }
 
     section(&mut out, "Status file");
-    let mut file = format!("{}", sim.dir.join(STATUS_FILE).display());
+    let mut file = location(sim.host.as_deref(), &sim.dir.join(STATUS_FILE));
     if sim.mtime.is_some() {
         file.push_str(&format!("  ({})", fmt::bytes(sim.size as f64)));
     }

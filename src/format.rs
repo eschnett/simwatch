@@ -153,8 +153,9 @@ pub struct Entry {
     pub label: Option<String>,
 }
 
-/// Read and parse a status file, refusing files that are too large.
-pub fn read_status_file(path: &Path) -> Result<Status, String> {
+/// Read the text of a status file without parsing it, refusing files that
+/// are too large.
+pub fn read_status_text(path: &Path) -> Result<String, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     file.take(MAX_STATUS_BYTES + 1)
@@ -163,8 +164,7 @@ pub fn read_status_file(path: &Path) -> Result<Status, String> {
     if bytes.len() as u64 > MAX_STATUS_BYTES {
         return Err(format!("file larger than {} KiB", MAX_STATUS_BYTES / 1024));
     }
-    let text = String::from_utf8_lossy(&bytes);
-    parse_status(&text)
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Parse the text of a status file.
@@ -705,8 +705,9 @@ images = [1, 2]
             text.push_str("# padding padding padding padding padding padding\n");
         }
         std::fs::write(&path, &text).unwrap();
-        assert!(read_status_file(&path).unwrap_err().contains("larger"));
+        assert!(read_status_text(&path).unwrap_err().contains("larger"));
         std::fs::write(&path, "name = \"small\"").unwrap();
-        assert_eq!(read_status_file(&path).unwrap().name.as_deref(), Some("small"));
+        let text = read_status_text(&path).unwrap();
+        assert_eq!(parse_status(&text).unwrap().name.as_deref(), Some("small"));
     }
 }

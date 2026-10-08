@@ -13,9 +13,9 @@ use crate::model::HealthParams;
 #[derive(Parser, Debug)]
 #[command(version, about = "Watch the progress of HPC simulations")]
 pub struct Cli {
-    /// Directories to search for simulations (default: from the config file,
-    /// else the current directory)
-    pub dirs: Vec<PathBuf>,
+    /// Directories to search for simulations, `HOST:DIR` for a remote host
+    /// (default: from the config file, else the current directory)
+    pub dirs: Vec<String>,
 
     /// Configuration file [default: ~/.config/simwatch/config.toml]
     #[arg(short, long)]
@@ -44,6 +44,10 @@ pub struct Cli {
     /// Print the list of simulations once and exit
     #[arg(long)]
     pub print: bool,
+
+    /// Serve another simwatch over ssh (speaks a protocol on stdin/stdout)
+    #[arg(long)]
+    pub serve: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -75,11 +79,25 @@ struct FileConfig {
     images: Option<ImageMode>,
     /// Terminal cell size in pixels, overriding detection
     font_size: Option<[u16; 2]>,
+    ssh: Option<Vec<String>>,
+    remote_program: Option<String>,
+    auto_reconnect: Option<bool>,
+}
+
+/// A remote host and the directories to watch there
+#[derive(Clone, Debug, PartialEq)]
+pub struct Remote {
+    /// Passed to ssh as given, so aliases from `~/.ssh/config` work
+    pub host: String,
+    /// Expanded on the remote host
+    pub roots: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Local directories
     pub roots: Vec<PathBuf>,
+    pub remotes: Vec<Remote>,
     pub refresh_interval: Duration,
     pub scan_interval: Duration,
     pub squeue_interval: Duration,
@@ -91,7 +109,15 @@ pub struct Config {
     pub images: ImageMode,
     /// Terminal cell size in pixels; detected if not set
     pub font_size: Option<[u16; 2]>,
+    /// The ssh command and its options
+    pub ssh: Vec<String>,
+    /// The simwatch command on remote hosts
+    pub remote_program: String,
+    /// Reconnect lost hosts automatically if that needs no password
+    pub auto_reconnect: bool,
     pub print: bool,
+    /// Keep the raw text of status files instead of parsing them (`--serve`)
+    pub keep_text: bool,
 }
 
 /// Cell size in pixels if neither the terminal nor the configuration says
@@ -101,6 +127,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             roots: vec![PathBuf::from(".")],
+            remotes: Vec::new(),
             refresh_interval: Duration::from_secs(60),
             scan_interval: Duration::from_secs(300),
             squeue_interval: Duration::from_secs(120),
@@ -111,7 +138,11 @@ impl Default for Config {
             limits: Limits::default(),
             images: ImageMode::Sixel,
             font_size: None,
+            ssh: vec!["ssh".into()],
+            remote_program: "simwatch".into(),
+            auto_reconnect: true,
             print: false,
+            keep_text: false,
         }
     }
 }
@@ -121,7 +152,7 @@ pub fn default_config_path() -> Option<PathBuf> {
 }
 
 /// Expand a leading `~/`
-fn expand(s: &str) -> PathBuf {
+pub fn expand(s: &str) -> PathBuf {
     match (s.strip_prefix("~/"), dirs::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),
         _ if s == "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from(s)),
@@ -129,8 +160,14 @@ fn expand(s: &str) -> PathBuf {
     }
 }
 
+/// Split a remote root `HOST:PATH` (like scp: a colon before any slash)
+pub fn split_remote(s: &str) -> Option<(&str, &str)> {
+    let (host, path) = s.split_once(':')?;
+    (!host.is_empty() && !host.contains('/') && !host.starts_with('-')).then_some((host, path))
+}
+
 /// Durations below one second would hammer the file system
-fn secs(x: f64) -> Duration {
+pub fn secs(x: f64) -> Duration {
     Duration::from_secs_f64(if x.is_finite() { x.max(1.0) } else { 60.0 })
 }
 
@@ -149,17 +186,33 @@ impl Config {
 
     fn merge(cli: &Cli, f: FileConfig) -> Config {
         let d = Config::default();
-        let roots = if !cli.dirs.is_empty() {
+        let given = if !cli.dirs.is_empty() {
             cli.dirs.clone()
-        } else if let Some(r) = f.roots.filter(|r| !r.is_empty()) {
-            r.iter().map(|s| expand(s)).collect()
         } else {
-            d.roots
+            f.roots.unwrap_or_default()
         };
+        let mut roots = Vec::new();
+        let mut remotes: Vec<Remote> = Vec::new();
+        for r in &given {
+            match split_remote(r) {
+                Some((host, path)) => match remotes.iter_mut().find(|x| x.host == host) {
+                    Some(x) => x.roots.push(path.to_string()),
+                    None => remotes.push(Remote {
+                        host: host.to_string(),
+                        roots: vec![path.to_string()],
+                    }),
+                },
+                None => roots.push(expand(r)),
+            }
+        }
+        if roots.is_empty() && remotes.is_empty() {
+            roots = d.roots;
+        }
         let dl = Limits::default();
         let dh = HealthParams::default();
         Config {
             roots,
+            remotes,
             refresh_interval: cli
                 .refresh
                 .or(f.refresh_interval)
@@ -188,8 +241,32 @@ impl Config {
             },
             images: cli.images.or(f.images).unwrap_or(d.images),
             font_size: f.font_size.or(d.font_size),
+            ssh: f.ssh.filter(|s| !s.is_empty()).unwrap_or(d.ssh),
+            remote_program: f.remote_program.unwrap_or(d.remote_program),
+            auto_reconnect: f.auto_reconnect.unwrap_or(d.auto_reconnect),
             print: cli.print,
+            keep_text: false,
         }
+    }
+
+    /// The sources of simulations in a fixed order: the local directories
+    /// (`None`) if any, then each remote host
+    pub fn sources(&self) -> Vec<Option<String>> {
+        let local = (!self.roots.is_empty()).then_some(None);
+        local
+            .into_iter()
+            .chain(self.remotes.iter().map(|r| Some(r.host.clone())))
+            .collect()
+    }
+
+    /// All roots for display, remote ones as `HOST:PATH`
+    pub fn root_names(&self) -> Vec<String> {
+        let local = self.roots.iter().map(|r| r.display().to_string());
+        let remote = self
+            .remotes
+            .iter()
+            .flat_map(|r| r.roots.iter().map(|p| format!("{}:{p}", r.host)));
+        local.chain(remote).collect()
     }
 }
 
@@ -227,6 +304,40 @@ images = "none"
         let c = Config::merge(&cli, FileConfig::default());
         assert_eq!(c.roots, [PathBuf::from("a"), PathBuf::from("b")]);
         assert_eq!(c.refresh_interval, Duration::from_secs(60));
+        assert!(c.remotes.is_empty());
+        assert_eq!(c.sources(), [None]);
+    }
+
+    #[test]
+    fn remote_roots() {
+        assert_eq!(split_remote("sym:/mnt/runs"), Some(("sym", "/mnt/runs")));
+        assert_eq!(split_remote("me@sym:~/runs"), Some(("me@sym", "~/runs")));
+        assert_eq!(split_remote("sym:"), Some(("sym", "")));
+        assert_eq!(split_remote("./a:b"), None);
+        assert_eq!(split_remote("/x/a:b"), None);
+        assert_eq!(split_remote(":x"), None);
+        assert_eq!(split_remote("-oProxyCommand=x:y"), None);
+        assert_eq!(split_remote("runs"), None);
+
+        let cli = Cli::parse_from(["simwatch", "sym:/a", "local", "other:b", "sym:~/c"]);
+        let c = Config::merge(&cli, FileConfig::default());
+        assert_eq!(c.roots, [PathBuf::from("local")]);
+        assert_eq!(c.remotes.len(), 2);
+        assert_eq!(c.remotes[0].host, "sym");
+        assert_eq!(c.remotes[0].roots, ["/a", "~/c"]);
+        assert_eq!(c.remotes[1].roots, ["b"]);
+        assert_eq!(c.sources(), [None, Some("sym".into()), Some("other".into())]);
+        assert_eq!(c.root_names(), ["local", "sym:/a", "sym:~/c", "other:b"]);
+
+        // Only remote roots: no local source
+        let f: FileConfig =
+            toml::from_str("roots = [\"sym:/a\"]\nssh = [\"ssh\", \"-C\"]\nauto_reconnect = false")
+                .unwrap();
+        let c = Config::merge(&Cli::parse_from(["simwatch"]), f);
+        assert!(c.roots.is_empty());
+        assert_eq!(c.sources(), [Some("sym".into())]);
+        assert_eq!(c.ssh, ["ssh", "-C"]);
+        assert!(!c.auto_reconnect);
     }
 
     #[test]

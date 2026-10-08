@@ -1,36 +1,56 @@
 //! Loading thumbnails on a background thread, with strict size limits.
 
-use std::fs;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::fs::{self, File};
+use std::io::{Cursor, Read};
+use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
 use image::{DynamicImage, ImageError, ImageReader};
 
 use crate::discover::confined_path;
+use crate::model::SimId;
 
 /// Image files larger than this are not read
 pub const MAX_IMAGE_BYTES: u64 = 1024 * 1024;
 /// Images with more pixels than this in either direction are not decoded
 pub const MAX_IMAGE_DIM: u32 = 1024;
 
-/// Identifies an image: the simulation directory and the path given in its status file
-pub type ImageKey = (PathBuf, String);
+/// Identifies an image: the simulation and the path given in its status file
+pub type ImageKey = (SimId, String);
 
-pub fn load_image(sim_dir: &Path, file: &str) -> Result<DynamicImage, String> {
+/// Fetches the bytes of an image from a remote host: host, simulation
+/// directory, and the path given in the status file
+pub type Fetch = Box<dyn Fn(&str, &Path, &str) -> Result<Vec<u8>, String> + Send>;
+
+/// Read an image file of a simulation without decoding it
+pub fn read_image_bytes(sim_dir: &Path, file: &str) -> Result<Vec<u8>, String> {
     let path = confined_path(sim_dir, file)
         .ok_or_else(|| "missing, or outside the simulation directory".to_string())?;
-    let len = fs::metadata(&path).map_err(|e| e.to_string())?.len();
-    if len > MAX_IMAGE_BYTES {
-        return Err(format!(
+    let too_large = |len: u64| {
+        format!(
             "image too large ({} KiB, max {} KiB)",
             len.div_ceil(1024),
             MAX_IMAGE_BYTES / 1024
-        ));
+        )
+    };
+    let len = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if len > MAX_IMAGE_BYTES {
+        return Err(too_large(len));
     }
-    let mut reader = ImageReader::open(&path)
-        .map_err(|e| e.to_string())?
+    let mut bytes = Vec::new();
+    File::open(&path)
+        .and_then(|f| f.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(too_large(bytes.len() as u64));
+    }
+    Ok(bytes)
+}
+
+/// Decode an image, refusing images that are too large
+pub fn decode_image(bytes: &[u8]) -> Result<DynamicImage, String> {
+    let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| e.to_string())?;
     let mut limits = image::Limits::default();
@@ -42,26 +62,34 @@ pub fn load_image(sim_dir: &Path, file: &str) -> Result<DynamicImage, String> {
         ImageError::Limits(_) => {
             format!("image too large (max {MAX_IMAGE_DIM}×{MAX_IMAGE_DIM} pixels)")
         }
-        ImageError::IoError(e) if e.kind() == ErrorKind::NotFound => "missing".into(),
         e => e.to_string(),
     })
 }
 
-/// A background thread that decodes images on request
+pub fn load_image(sim_dir: &Path, file: &str) -> Result<DynamicImage, String> {
+    decode_image(&read_image_bytes(sim_dir, file)?)
+}
+
+/// A background thread that loads and decodes images on request
 pub struct Loader {
     tx: Sender<ImageKey>,
     pub rx: Receiver<(ImageKey, Result<DynamicImage, String>)>,
 }
 
 impl Loader {
-    pub fn start() -> Loader {
+    /// `fetch` gets the bytes of images of remote simulations
+    pub fn start(fetch: Fetch) -> Loader {
         let (tx, req_rx) = channel::<ImageKey>();
         let (res_tx, rx) = channel();
         thread::Builder::new()
             .name("simwatch-images".into())
             .spawn(move || {
                 for key in req_rx {
-                    let img = load_image(&key.0, &key.1);
+                    let ((host, dir), file) = &key;
+                    let img = match host {
+                        None => load_image(dir, file),
+                        Some(h) => fetch(h, dir, file).and_then(|b| decode_image(&b)),
+                    };
                     if res_tx.send((key, img)).is_err() {
                         return;
                     }

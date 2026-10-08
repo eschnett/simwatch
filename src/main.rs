@@ -6,10 +6,12 @@ mod format;
 mod images;
 mod model;
 mod monitor;
+mod remote;
 mod slurm;
 mod ui;
 
 use std::io::IsTerminal;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 
 use anyhow::{Result, bail};
@@ -22,6 +24,9 @@ use model::health;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.serve {
+        return remote::serve::serve(std::io::stdin(), std::io::stdout().lock());
+    }
     let cfg = Config::load(&cli)?;
     if cfg.print {
         return print_once(&cfg);
@@ -35,11 +40,17 @@ fn main() -> Result<()> {
         ImageMode::Sixel => Some(sixel_picker(&cfg)),
     };
 
+    // Connecting to remote hosts may ask for passwords, before the TUI starts
     let (tx, rx) = channel();
     let monitor = monitor::Monitor::start(&cfg, tx);
-    let app = ui::App::new(cfg, picker);
+    if monitor.all_failed() {
+        bail!("could not connect to any host");
+    }
+    let app = ui::App::new(cfg, picker, monitor.image_fetch());
     let mut terminal = ratatui::init();
+    remote::client::TUI_ACTIVE.store(true, Ordering::Relaxed);
     let res = ui::run(&mut terminal, app, rx, monitor);
+    remote::client::TUI_ACTIVE.store(false, Ordering::Relaxed);
     ratatui::restore();
     res
 }
@@ -68,23 +79,19 @@ fn sixel_picker(cfg: &Config) -> Picker {
 }
 
 fn print_once(cfg: &Config) -> Result<()> {
-    let (sims, scan, snap) = monitor::collect_once(cfg);
-    let snap = match snap {
-        Some(Ok(s)) => Some(s),
-        Some(Err(e)) => {
-            eprintln!("simwatch: {e}");
-            None
-        }
-        None => None,
-    };
-    for w in &scan.warnings {
+    let monitor::Collected {
+        sims,
+        snaps,
+        warnings,
+    } = monitor::collect_once(cfg);
+    for w in &warnings {
         eprintln!("simwatch: {w}");
     }
     let now = Utc::now();
     let mut rows: Vec<(usize, model::Health)> = sims
         .iter()
         .enumerate()
-        .map(|(i, s)| (i, health(s, now, snap.as_ref(), &cfg.health)))
+        .map(|(i, s)| (i, health(s, now, snaps.get(&s.host), &cfg.health)))
         .collect();
     rows.sort_by(|a, b| {
         sims[b.0]
@@ -92,6 +99,6 @@ fn print_once(cfg: &Config) -> Result<()> {
             .cmp(&sims[a.0].sort_time())
             .then_with(|| sims[a.0].display_name().cmp(&sims[b.0].display_name()))
     });
-    print!("{}", ui::list::text(&sims, &rows, now, snap.as_ref()));
+    print!("{}", ui::list::text(&sims, &rows, now, &snaps));
     Ok(())
 }

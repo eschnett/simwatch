@@ -1,5 +1,7 @@
 //! The list view: one line per simulation.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -15,6 +17,7 @@ use crate::slurm::{Snapshot, short_state};
 pub enum Col {
     Glyph,
     Name,
+    Host,
     Group,
     State,
     Iter,
@@ -34,6 +37,7 @@ impl Col {
         match self {
             Col::Glyph => "",
             Col::Name => "Name",
+            Col::Host => "Host",
             Col::Group => "Group",
             Col::State => "State",
             Col::Iter => "Iter",
@@ -53,6 +57,7 @@ impl Col {
         match self {
             Col::Glyph => Constraint::Length(1),
             Col::Name | Col::Summary => Constraint::Fill(1),
+            Col::Host => Constraint::Length(12),
             Col::Group => Constraint::Length(14),
             Col::State => Constraint::Length(11),
             Col::Iter => Constraint::Length(8),
@@ -68,8 +73,16 @@ impl Col {
     }
 
     /// Columns that give way first when the terminal is too narrow
-    const DROP_ORDER: [Col; 7] =
-        [Col::Res, Col::Wall, Col::Speed, Col::Iter, Col::Group, Col::Eta, Col::Job];
+    const DROP_ORDER: [Col; 8] = [
+        Col::Res,
+        Col::Wall,
+        Col::Speed,
+        Col::Iter,
+        Col::Host,
+        Col::Group,
+        Col::Eta,
+        Col::Job,
+    ];
 
     /// Least useful width
     fn min_width(self) -> u16 {
@@ -86,9 +99,16 @@ impl Col {
     }
 }
 
-/// The columns to show: Group and Summary only if some simulation has one
+/// The columns to show: Group and Summary only if some simulation has one,
+/// Host only if the simulations come from more than one host
 pub fn columns<'a>(sims: impl IntoIterator<Item = &'a Sim> + Clone) -> Vec<Col> {
     let mut cols = vec![Col::Glyph, Col::Name];
+    let mut hosts = sims.clone().into_iter().map(|s| &s.host);
+    if let Some(first) = hosts.next() {
+        if hosts.any(|h| h != first) {
+            cols.push(Col::Host);
+        }
+    }
     if sims.clone().into_iter().any(|s| s.st().group.is_some()) {
         cols.push(Col::Group);
     }
@@ -118,6 +138,7 @@ pub fn cell(col: Col, sim: &Sim, h: Health, now: DateTime<Utc>, snap: Option<&Sn
     match col {
         Col::Glyph => h.glyph().to_string(),
         Col::Name => sim.display_name(),
+        Col::Host => sim.host.clone().unwrap_or_else(|| "local".into()),
         Col::Group => st.group.clone().unwrap_or_default(),
         Col::State => {
             let mut state = h.label().to_string();
@@ -214,13 +235,21 @@ pub fn summary_text(sim: &Sim) -> String {
     items.join("  ")
 }
 
-/// Plain-text table (for `--print`)
-pub fn text(sims: &[Sim], rows: &[(usize, Health)], now: DateTime<Utc>, snap: Option<&Snapshot>) -> String {
+/// Plain-text table (for `--print`), with the Slurm snapshot of each host
+pub fn text(
+    sims: &[Sim],
+    rows: &[(usize, Health)],
+    now: DateTime<Utc>,
+    snaps: &HashMap<Option<String>, Snapshot>,
+) -> String {
     let cols = columns(rows.iter().map(|(i, _)| &sims[*i]));
     let mut table: Vec<Vec<String>> = vec![cols.iter().map(|c| c.header().to_string()).collect()];
     table.extend(
         rows.iter()
-            .map(|(i, h)| cols.iter().map(|c| cell(*c, &sims[*i], *h, now, snap)).collect()),
+            .map(|(i, h)| {
+                let sim = &sims[*i];
+                cols.iter().map(|c| cell(*c, sim, *h, now, snaps.get(&sim.host))).collect()
+            }),
     );
     let mut width = vec![0usize; cols.len()];
     for row in &table {
@@ -262,15 +291,17 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let vis = app.visible();
     if vis.is_empty() {
         let msg = if app.sims.is_empty() {
-            if app.scan.done.is_none() {
+            let looking = app
+                .sources
+                .iter()
+                .any(|s| s.scan.done.is_none() && s.disconnected.is_none());
+            if looking {
                 "Looking for simulations…".to_string()
             } else {
-                let roots: Vec<String> =
-                    app.cfg.roots.iter().map(|r| r.display().to_string()).collect();
                 format!(
                     "No simulations (no {} files) found below {}",
                     crate::format::STATUS_FILE,
-                    roots.join(", ")
+                    app.cfg.root_names().join(", ")
                 )
             }
         } else {
@@ -280,7 +311,6 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         return;
     }
     let now = Utc::now();
-    let snap = app.slurm.as_ref();
     let mut cols = columns(vis.iter().map(|(i, _)| &app.sims[*i]));
     let needed = |cols: &[Col]| -> u16 { cols.iter().map(|c| c.min_width() + 1).sum() };
     for drop in Col::DROP_ORDER {
@@ -293,12 +323,14 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         .iter()
         .map(|(i, h)| {
             let hs = health_style(*h);
+            let sim = &app.sims[*i];
+            let snap = app.snap(sim);
             Row::new(cols.iter().map(|c| {
-                let cell = Cell::from(cell(*c, &app.sims[*i], *h, now, snap));
+                let cell = Cell::from(cell(*c, sim, *h, now, snap));
                 match c {
                     Col::Glyph | Col::State => cell.style(hs),
                     Col::Name => cell.bold(),
-                    Col::Group => cell.dim(),
+                    Col::Host | Col::Group => cell.dim(),
                     _ => cell,
                 }
             }))

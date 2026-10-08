@@ -1,6 +1,6 @@
 //! Simulations as seen by SimWatch, and their derived health.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
@@ -8,28 +8,58 @@ use chrono::{DateTime, Utc};
 use crate::format::{Entry, Status};
 use crate::slurm::{self, Job};
 
+/// Identifies a simulation: its host (`None` for local) and directory
+pub type SimId = (Option<String>, PathBuf);
+
 /// What SimWatch knows about one simulation directory
 #[derive(Clone, Debug)]
 pub struct Sim {
+    /// The remote host, or `None` for a local directory
+    pub host: Option<String>,
     pub dir: PathBuf,
     /// Modification time and size of the status file when it was last read
     pub mtime: Option<SystemTime>,
     pub size: u64,
+    /// Whether reading the status file has been attempted
+    pub read: bool,
     /// The last successfully parsed contents
     pub status: Option<Status>,
     /// Set if the most recent read or parse failed
     pub error: Option<String>,
+    /// The raw text, if it was read in the latest pass; only kept when
+    /// serving a remote client, which parses it itself
+    pub text: Option<String>,
 }
 
 impl Sim {
     pub fn new(dir: PathBuf) -> Self {
+        Self::on(None, dir)
+    }
+
+    pub fn on(host: Option<String>, dir: PathBuf) -> Self {
         Sim {
+            host,
             dir,
             mtime: None,
             size: 0,
+            read: false,
             status: None,
             error: None,
+            text: None,
         }
+    }
+
+    pub fn id(&self) -> SimId {
+        (self.host.clone(), self.dir.clone())
+    }
+
+    pub fn is(&self, id: &SimId) -> bool {
+        self.host == id.0 && self.dir == id.1
+    }
+
+    /// `host:dir` for remote simulations, else the directory
+    pub fn location(&self) -> String {
+        location(self.host.as_deref(), &self.dir)
     }
 
     pub fn st(&self) -> &Status {
@@ -271,6 +301,14 @@ impl Health {
     /// Finished or failed: nothing will happen any more
     pub fn is_done(self) -> bool {
         matches!(self, Health::Finished | Health::Failed)
+    }
+}
+
+/// `host:path`, or `path` for local paths
+pub fn location(host: Option<&str>, path: &Path) -> String {
+    match host {
+        Some(h) => format!("{h}:{}", path.display()),
+        None => path.display().to_string(),
     }
 }
 
