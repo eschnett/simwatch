@@ -688,10 +688,10 @@ impl App {
         } else {
             format!("{vis}/{total} sims")
         };
-        if let Some((msg, t)) = &self.notice {
-            if t.elapsed() < Duration::from_secs(3) {
-                right = format!("{msg} │ {right}");
-            }
+        if let Some((msg, t)) = &self.notice
+            && t.elapsed() < Duration::from_secs(3)
+        {
+            right = format!("{msg} │ {right}");
         }
         right.push_str(" │ ? help ");
         let [l, r] = Layout::horizontal([

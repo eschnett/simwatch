@@ -246,32 +246,32 @@ fn status_from_table(t: &mut Table) -> Status {
         put_back(t, "slurm", s);
     }
 
-    if let Some(Value::Array(arr)) = t.get("black_holes") {
-        if arr.iter().all(Value::is_table) {
-            let Some(Value::Array(arr)) = t.remove("black_holes") else {
+    if let Some(Value::Array(arr)) = t.get("black_holes")
+        && arr.iter().all(Value::is_table)
+    {
+        let Some(Value::Array(arr)) = t.remove("black_holes") else {
+            unreachable!()
+        };
+        let mut rest = Vec::new();
+        for v in arr {
+            let Value::Table(mut b) = v else {
                 unreachable!()
             };
-            let mut rest = Vec::new();
-            for v in arr {
-                let Value::Table(mut b) = v else {
-                    unreachable!()
-                };
-                st.black_holes.push(BlackHole {
-                    name: take_string(&mut b, "name"),
-                    mass: take_number(&mut b, "mass"),
-                    irreducible_mass: take_number(&mut b, "irreducible_mass"),
-                    spin: take_vector(&mut b, "spin"),
-                    position: take_vector(&mut b, "position"),
-                    found: take_bool(&mut b, "found"),
-                });
-                rest.push(Value::Table(b));
-            }
-            if rest
-                .iter()
-                .any(|v| v.as_table().is_some_and(|b| !b.is_empty()))
-            {
-                t.insert("black_holes".into(), Value::Array(rest));
-            }
+            st.black_holes.push(BlackHole {
+                name: take_string(&mut b, "name"),
+                mass: take_number(&mut b, "mass"),
+                irreducible_mass: take_number(&mut b, "irreducible_mass"),
+                spin: take_vector(&mut b, "spin"),
+                position: take_vector(&mut b, "position"),
+                found: take_bool(&mut b, "found"),
+            });
+            rest.push(Value::Table(b));
+        }
+        if rest
+            .iter()
+            .any(|v| v.as_table().is_some_and(|b| !b.is_empty()))
+        {
+            t.insert("black_holes".into(), Value::Array(rest));
         }
     }
 

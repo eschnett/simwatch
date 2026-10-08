@@ -179,10 +179,10 @@ impl Local {
 
     fn request(&self, r: Request) {
         let _ = self.fs.send(r);
-        if r == Request::Rescan {
-            if let Some(s) = &self.slurm {
-                let _ = s.send(());
-            }
+        if r == Request::Rescan
+            && let Some(s) = &self.slurm
+        {
+            let _ = s.send(());
         }
     }
 }

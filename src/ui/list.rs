@@ -104,10 +104,10 @@ impl Col {
 pub fn columns<'a>(sims: impl IntoIterator<Item = &'a Sim> + Clone) -> Vec<Col> {
     let mut cols = vec![Col::Glyph, Col::Name];
     let mut hosts = sims.clone().into_iter().map(|s| &s.host);
-    if let Some(first) = hosts.next() {
-        if hosts.any(|h| h != first) {
-            cols.push(Col::Host);
-        }
+    if let Some(first) = hosts.next()
+        && hosts.any(|h| h != first)
+    {
+        cols.push(Col::Host);
     }
     if sims.clone().into_iter().any(|s| s.st().group.is_some()) {
         cols.push(Col::Group);

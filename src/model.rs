@@ -131,11 +131,11 @@ impl Sim {
     /// Estimated seconds until the end, and whether it comes from an average
     pub fn eta(&self) -> Option<(f64, bool)> {
         let p = &self.st().progress;
-        if p.fraction.is_none() {
-            if let (Some(t), Some(t_end), Some((speed, avg))) = (p.time, p.time_end, self.speed()) {
-                let remaining = t_end - t;
-                return (speed > 0.0 && remaining > 0.0).then(|| (remaining / speed * 3600.0, avg));
-            }
+        if p.fraction.is_none()
+            && let (Some(t), Some(t_end), Some((speed, avg))) = (p.time, p.time_end, self.speed())
+        {
+            let remaining = t_end - t;
+            return (speed > 0.0 && remaining > 0.0).then(|| (remaining / speed * 3600.0, avg));
         }
         // From the fraction done in the wall time so far
         let (f, wall) = (self.fraction()?, p.walltime?);

@@ -221,10 +221,10 @@ impl Control {
     }
 
     fn send(&mut self, msg: &ToServer) {
-        if let Some(c) = &mut self.conn {
-            if let Err(e) = write_msg(&mut c.stdin, msg) {
-                self.lost(e.to_string());
-            }
+        if let Some(c) = &mut self.conn
+            && let Err(e) = write_msg(&mut c.stdin, msg)
+        {
+            self.lost(e.to_string());
         }
     }
 
@@ -404,10 +404,10 @@ impl Reader {
                     self.reply(dir, file, Err(error))
                 }
                 Ok(Some(m)) => {
-                    if let Some(u) = state.apply(m) {
-                        if !self.out.send(u) {
-                            return;
-                        }
+                    if let Some(u) = state.apply(m)
+                        && !self.out.send(u)
+                    {
+                        return;
                     }
                 }
                 Ok(None) => {

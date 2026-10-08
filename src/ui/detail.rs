@@ -132,10 +132,10 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     );
     kv(&mut out, "Directory", sim.location());
     let mut state = h.label().to_string();
-    if let Some(s) = &st.status {
-        if !s.eq_ignore_ascii_case(h.label()) {
-            state.push_str(&format!("  (reported: {s})"));
-        }
+    if let Some(s) = &st.status
+        && !s.eq_ignore_ascii_case(h.label())
+    {
+        state.push_str(&format!("  (reported: {s})"));
     }
     out.push(Line::from(vec![
         Span::raw(format!("{:<KEY_WIDTH$} ", "State")).dim(),
