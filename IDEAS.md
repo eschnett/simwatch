@@ -71,6 +71,18 @@ would be called only for jobs that just disappeared.
 - **Rust with ratatui** (chosen): ratatui-image reserves cells for images and
   redraws them correctly.
 
+## Remote hosts
+
+- Settings per host (`ssh` options, `remote_program`, intervals), e.g. in
+  `[hosts.symmetry]` tables.
+- Copy a matching simwatch binary to the remote host automatically when it
+  is missing or has a different version. This needs a binary for the remote
+  platform (e.g. a static musl build) at hand.
+- Compress status files on the wire, or send only differences; so far they
+  are small enough.
+- Ask for a password inside the display instead of giving the terminal back
+  to ssh (`SSH_ASKPASS`).
+
 ## Small things
 
 - Mouse support: click to select, scroll wheel.

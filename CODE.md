@@ -24,18 +24,28 @@ The UI thread never touches the file system or runs processes. Workers do
 one job at a time and coalesce requests that arrive while they are busy, so
 a hanging file system or Slurm cannot pile up threads.
 
+The diagram shows the local directories. Each remote host is another
+source: a client (`simwatch-HOST` thread plus reader threads) that keeps one
+ssh connection to `simwatch --serve`, which runs the same two workers on the
+remote host (see [Remote hosts](#remote-hosts-remote)). Every message to the
+UI is tagged with the index of its source in `Config::sources()`: the local
+directories first, if there are any, then each host.
+
 ## Modules
 
 | File | Purpose |
 |---|---|
-| `src/main.rs` | CLI entry: load config, `--print` mode, choose the image picker, start workers, run the UI |
-| `src/config.rs` | `Cli` (clap), `FileConfig` (TOML, `deny_unknown_fields`), merged `Config` with defaults |
+| `src/main.rs` | CLI entry: load config, `--serve` and `--print` modes, choose the image picker, start workers (connecting to remote hosts), run the UI |
+| `src/config.rs` | `Cli` (clap), `FileConfig` (TOML, `deny_unknown_fields`), merged `Config` with defaults; `HOST:DIR` roots become `Config::remotes` |
 | `src/format.rs` | Parse `simwatch.toml` into `Status` |
 | `src/model.rs` | `Sim` (one directory), derived numbers, `Health` and `health()` |
 | `src/discover.rs` | Bounded breadth-first directory scan; `confined_path` for image paths |
-| `src/monitor.rs` | File system and Slurm worker threads, `Request`/`Update` messages, `collect_once` for `--print` |
+| `src/monitor.rs` | `Monitor` with its sources, the local file system and Slurm worker threads, `Request`/`Update` messages, `collect_once` for `--print` |
+| `src/remote/mod.rs` | The protocol between `simwatch` and `simwatch --serve`: messages and framing |
+| `src/remote/serve.rs` | `simwatch --serve`, the remote side |
+| `src/remote/client.rs` | The local side of a remote host: the ssh connection, reconnecting, image requests |
 | `src/slurm.rs` | Run and parse `squeue`; `Snapshot` with job lookup |
-| `src/images.rs` | Image size limits and the image loader thread |
+| `src/images.rs` | Image size limits (`read_image_bytes`, `decode_image`) and the image loader thread |
 | `src/ui/mod.rs` | `App` state, key handling, header and status bar, the event loop `run` |
 | `src/ui/list.rs` | List view: the `Col` enum, `columns()` (which columns to show), `cell()` (one cell's text), shared with the cards and `--print` (`text()`) |
 | `src/ui/cards.rs` | Card view |
@@ -128,6 +138,10 @@ symlinks that point outside.
 
 ## Workers (`monitor.rs`)
 
+`Monitor::start` starts a `Local` source (the two workers below) if there are
+local roots, and a `remote::client::Client` per remote host. `request`
+sends `Reread`/`Rescan` to all of them.
+
 The file system worker (`fs_worker`) keeps the authoritative `Vec<Sim>`:
 - **Full scan** every `scan_interval`, or on `Request::Rescan`.
   `merge_found` keeps known `Sim` records for directories that are still
@@ -138,6 +152,9 @@ The file system worker (`fs_worker`) keeps the authoritative `Vec<Sim>`:
   vanished file only sets `error`; the next scan drops the simulation. This
   keeps a non-atomic writer from making a simulation disappear for a whole
   scan interval.
+- With `Config::keep_text` (set only by `--serve`) `reread` does not parse:
+  it stores the text of the files read in this pass in `Sim::text`, cleared
+  at the start of each pass. `Sim::read` records that a read was attempted.
 - After each step it sends the whole list (`Update::Sims`). The lists are
   small (≤ 500 simulations), so cloning is cheap and keeps the UI simple.
 - It waits with `recv_timeout` until the next deadline. Requests that queued
@@ -153,14 +170,76 @@ large output cannot block the child. It polls `try_wait` and kills the child
 at the timeout. `Snapshot::find` matches job ids exactly first, then by base
 id (`123_4`, `123_[1-5]` and `123+0` all have base `123`).
 
+## Remote hosts (`remote/`)
+
+**Connection.** `Client::start` runs `ssh [ssh options] -T -o
+ServerAliveInterval=30 -o ServerAliveCountMax=4 HOST '<remote_program>
+--serve'` with piped stdin, stdout and stderr. ssh asks for passwords on
+`/dev/tty`, so prompts work although its stdio are pipes. The first
+connection is made in `Monitor::start`, before the TUI starts, one host
+after another. `TUI_ACTIVE` says whether the TUI owns the terminal: while it
+does not, ssh's stderr is passed through; otherwise only its last line is
+kept, as the reason for a failure.
+
+**Threads per host.** The control thread (`Control::run`) owns the ssh
+child and its stdin, and handles requests, image requests, reconnecting and
+lost connections. A reader thread per connection reads stdout: it waits for
+the first line, then applies messages to a `State` (the host's simulations)
+and sends `Update`s. Connections are numbered, so that a `Lost` from an old
+reader is ignored.
+
+**Lost connections.** At the end of stdout the reader reports `Lost` with
+ssh's last stderr line. The control thread drops the connection (killing
+ssh), answers waiting image requests with an error, and sends
+`Update::Disconnected`. With `auto_reconnect` it retries with
+`BatchMode=yes` (never prompts) after 1 min, doubling up to 30 min. The `c`
+key sets `App::reconnect`; `ui::run` then leaves raw mode and the alternate
+screen, calls `Monitor::reconnect` (interactive ssh, one host after
+another), and takes the terminal back.
+
+**Protocol** (`remote/mod.rs`). One JSON object per line, tagged by
+`"type"`, at most 1 MiB. The server first prints
+`simwatch-serve <PROTOCOL> <version>`; the client skips up to 64 KiB of
+other output before it (login scripts) and refuses a different `PROTOCOL`.
+Unknown message types become `Unknown` and are ignored.
+- To the server: `hello` (roots, intervals, limits, `slurm`, `once`), then
+  `reread`, `rescan`, `image`.
+- From the server: the activity messages, `file` for each status file that
+  was read in this pass or whose (mtime, size, error) changed, `sims` with
+  all directories in order (this ends a pass), the Slurm messages with the
+  jobs, `image` followed by the raw file, `image_error`, `warning`, and
+  `done` after a `once` request.
+
+Status files travel as **raw text** and are parsed by the client
+(`State::apply`). The protocol therefore does not change with the status
+file format, and an older server works with a newer client. A `file`
+message with text replaces the status (or sets a parse error and keeps the
+last good status); one without text only carries a read error.
+
+**Server** (`serve.rs`). `hello` overrides the server's configuration
+(`Hello::apply`); only `squeue_program` and `slurm = false` come from its
+own configuration file. It starts an ordinary `Monitor` with `keep_text`,
+and a `Writer` turns its updates into messages, remembering what it sent.
+Images are read with `read_image_bytes`, only from current simulation
+directories, on their own thread; the client decodes them with
+`decode_image`. One thread reads stdin; the end of stdin ends the process.
+`once` (for `--print`) uses `collect_local`, sends everything and `done`.
+
+**Images.** The `Loader` thread loads local images itself and asks a remote
+host through `Monitor::image_fetch`, which sends the request to the host's
+control thread and waits (at most 60 s) for the bytes.
+
 ## UI (`ui/`)
 
 `App` holds everything the UI shows. Worker messages are applied in
-`App::apply`, and `Activity` records when each worker started and last
-finished, for the spinners in the status bar.
+`App::apply`. Each source has a `Source` with its simulations, Slurm
+snapshot, connection state, and an `Activity` per worker recording when it
+started and last finished, for the spinners in the status bar. `App::sims`
+is all sources' simulations together. `App::snap(sim)` is the snapshot of
+the simulation's own host; Slurm job ids are only meaningful there.
 
-**Selection.** The selection is stored as a directory (`App::selected`), not
-as an index, so it survives re-sorting and new data. `visible()` computes
+**Selection.** The selection is stored as a `SimId`, host and directory
+(`App::selected`), not as an index, so it survives re-sorting and new data. `visible()` computes
 the filtered and sorted list of `(index, Health)` on every call. That is
 cheap for hundreds of simulations, and keeps all state derived.
 
@@ -215,7 +294,7 @@ These cost time to find; keep them in mind.
 
 ## Testing
 
-`cargo test` runs about 30 unit tests, all in-process and fast:
+`cargo test` runs about 45 unit tests, all in-process and fast:
 - parsing edge cases;
 - health states using a fixed clock;
 - `squeue` parsing, the missing-binary case, and the timeout case;
@@ -223,7 +302,14 @@ These cost time to find; keep them in mind.
 - image limits and path confinement;
 - rendering of every view into ratatui's `TestBackend`;
 - an end-to-end sixel test: load a PNG through the loader thread, render
-  the detail view, and find `ESC P` in the buffer.
+  the detail view, and find `ESC P` in the buffer;
+- remote roots, the protocol framing, and `simwatch --serve` talking to a
+  client `State` over a socket pair (updates, images, `once`).
+
+`tests/remote.rs` runs the real binary with `--print` against remote roots,
+using a fake `ssh` script that runs the remote command locally. The same
+trick works for trying the TUI with remote hosts without a second machine:
+set `ssh` to such a script and `remote_program` to the built binary.
 
 `writers/julia/runtests.jl` tests the Julia writer: the document, the rate
 limit and `update_interval`, that it never throws (unwritable directories),

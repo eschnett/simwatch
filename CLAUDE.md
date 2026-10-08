@@ -29,6 +29,7 @@ cargo clippy --all-targets          # must be warning-free
 cargo run -- --print DIR            # one-shot plain-text list, no TTY needed
 cargo run --example fake_sims -- DIR [--once]   # demo simulations in every state
 cargo run -- DIR                    # interactive (needs a real terminal)
+cargo run -- HOST:DIR               # a remote directory (simwatch must be installed there)
 julia writers/julia/runtests.jl     # tests of the Julia writer
 ```
 
@@ -47,6 +48,12 @@ julia writers/julia/runtests.jl     # tests of the Julia writer
   symlinked directories, size limits on every file read, at most one
   `squeue` call at a time with a timeout, and no file system access on the UI
   thread. Any new I/O must respect these rules (see CODE.md).
+- **Remote hosts over one ssh connection each.** Roots `HOST:DIR` are
+  watched by `simwatch --serve` on the remote host; logins may need MFA, so
+  never open more ssh sessions than one per host, and connect (or reconnect
+  interactively) only while the TUI has released the terminal. Status files
+  travel as raw text and are parsed locally; keep the protocol in
+  `src/remote/mod.rs` free of format details.
 - **Sixel only for images**, forced regardless of what the terminal
   advertises. The user runs WezTerm over ssh, without tmux. Other protocols
   and text fallbacks are in IDEAS.md.
@@ -63,6 +70,9 @@ julia writers/julia/runtests.jl     # tests of the Julia writer
 - A new configuration key goes into `FileConfig` and `Config` in
   `src/config.rs` and into the example in README.md. `FileConfig` rejects
   unknown keys, so the README example must stay valid.
+- A change to the messages between `simwatch` and `simwatch --serve` goes
+  into `src/remote/` (bump `PROTOCOL` if it is incompatible), its tests,
+  and CODE.md.
 - A new key binding goes into `handle_key` in `src/ui/mod.rs`, the help
   overlay (`src/ui/help.rs`), and README.md.
 - Code style: match the surrounding code; short doc comments on items,
