@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 description = "A TUI to watch HPC simulation progress"
 license = "MIT"
-rust-version = "1.86"
+rust-version = "1.90"
 
 [dependencies]
 anyhow = "1"
