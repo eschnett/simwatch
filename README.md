@@ -17,13 +17,15 @@ directories on one or more clusters, logging in to each only once (see
 ## Building
 
 SimWatch is written in Rust. Install Rust with [rustup](https://rustup.rs)
-(no root access needed), then:
+(no root access needed; Rust 1.90 or later), then:
 
 ```bash
-cargo install --path .
+cargo install simwatch
 ```
 
-This builds an optimized `simwatch` binary in `~/.cargo/bin`.
+This downloads SimWatch from [crates.io](https://crates.io/crates/simwatch)
+and builds an optimized `simwatch` binary in `~/.cargo/bin`. From a
+checkout of the repository, use `cargo install --path .` instead.
 
 On Symmetry, do this once on a login node; `~/.cargo/bin` must be in your
 `PATH`. Alternatively, cross-compile a static binary on another machine
