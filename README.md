@@ -183,6 +183,18 @@ A root `HOST:DIR` (a colon before any `/`, as for scp) is on a remote host.
   Press `c` to reconnect: SimWatch gives the terminal back to ssh for the
   password, then returns to the display.
 - **Slurm jobs** are looked up in the `squeue` output of their own host.
+  On many clusters `squeue` is in the `PATH` only of login shells, not of
+  the non-interactive session that runs `simwatch --serve`; the status bar
+  then shows `squeue off (squeue not found)` for that host. Set the full
+  path in the remote host's `~/.config/simwatch/config.toml` (`command -v
+  squeue` in a login shell there shows it):
+
+  ```toml
+  squeue_program = "/cm/shared/apps/slurm/current/bin/squeue"
+  ```
+
+  The remote simwatch reads this file when it starts, so restart SimWatch
+  afterwards; `c` reconnects only lost hosts.
 
 If you use ssh connection sharing, SimWatch reuses an existing login and
 needs no password at all, and its own connection serves your other ssh
