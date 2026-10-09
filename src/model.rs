@@ -401,7 +401,8 @@ mod tests {
         Snapshot::new(
             now(),
             parse_squeue(
-                "100|RUNNING|a|q|1|1:00|2:00|cn1\n101|PENDING|b|q|1|0:00|2:00|(Priority)\n",
+                "100|RUNNING|a|q|1|1:00|2:00|N/A|N/A|N/A|1||cn1\n\
+                 101|PENDING|b|q|1|0:00|2:00|N/A|N/A|N/A|1||(Priority)\n",
             ),
         )
     }

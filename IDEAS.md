@@ -53,6 +53,12 @@ whether they are queued, running or finished. SimWatch uses a single
 commands could still be useful for other schedulers or for jobs on other
 machines, run rarely and with a timeout.
 
+`squeue` can also report a job's working directory (`%Z`). SimWatch could
+match it against simulation directories, to find the job of a simulation
+whose status file has no `job_id` (or has not been written yet). With
+`squeue -O`, newer Slurm versions also report how often a job was requeued
+(`Restarts`).
+
 `sacct` could tell how a job ended (completed, failed, timeout, out of
 memory, node failure) once it is gone from `squeue`. It is slower, so it
 would be called only for jobs that just disappeared.

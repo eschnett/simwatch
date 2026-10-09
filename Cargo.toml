@@ -1,6 +1,6 @@
 [package]
 name = "simwatch"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 authors = ["Erik Schnetter <schnetter@gmail.com>"]
 description = "A TUI to watch HPC simulation progress"
@@ -14,7 +14,7 @@ rust-version = "1.90"
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 dirs = "6"

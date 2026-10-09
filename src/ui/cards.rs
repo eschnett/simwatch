@@ -113,8 +113,21 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
     if !job.is_empty() {
         jobline.push(dim("job "));
         jobline.push(Span::raw(job));
-        if let Some(j) = sim.job(snap) {
+        // The job named in the line, which may be the next one
+        if let Some(j) = sim
+            .shown_job()
+            .and_then(|(id, _, _)| snap.and_then(|s| s.find(id)))
+        {
             jobline.push(dim(&format!("  {} {}", j.partition, j.reason)));
+            if j.state == "PENDING"
+                && let Some(t) = j.start.filter(|t| *t > now)
+            {
+                jobline.push(dim(&format!(
+                    "  starts ~{} ({})",
+                    fmt::clock(t, now),
+                    fmt::relative(t, now)
+                )));
+            }
         }
     }
     let r = &st.resources;

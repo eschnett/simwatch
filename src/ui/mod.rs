@@ -1072,6 +1072,59 @@ time = [1, 2, 3, 4]
     }
 
     #[test]
+    fn slurm_times() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = app(tmp.path(), None);
+        app.sims = vec![
+            sim(
+                &tmp.path().join("q"),
+                "name = \"gh-a08\"\nstatus = \"queued\"\n[slurm]\njob_id = 572393",
+            ),
+            // Waiting for its next job: the card shows that job's details
+            sim(
+                &tmp.path().join("n"),
+                "name = \"gh-a09\"\nstatus = \"requeued\"\n\
+                 [slurm]\njob_id = 100\nnext_job_id = 572394",
+            ),
+        ];
+        let now = Utc::now();
+        let pending = |id: &str, reason: &str| crate::slurm::Job {
+            id: id.into(),
+            state: "PENDING".into(),
+            partition: "amdq".into(),
+            reason: reason.into(),
+            start: Some(now + chrono::Duration::minutes(78) + chrono::Duration::seconds(30)),
+            submit: Some(now - chrono::Duration::minutes(80)),
+            priority: "15230".into(),
+            dependency: "afterany:100".into(),
+            ..Default::default()
+        };
+        app.sources[0].slurm = Some(Snapshot::new(
+            now,
+            vec![
+                pending("572393", "(Resources)"),
+                pending("572394", "(Dependency)"),
+            ],
+        ));
+
+        app.view = View::Cards;
+        let cards = render(&mut app);
+        assert!(cards.contains("amdq (Resources)  starts ~"), "{cards}");
+        assert!(cards.contains("(in 78m)"), "{cards}");
+        assert!(cards.contains("amdq (Dependency)"), "{cards}");
+
+        app.view = View::List;
+        app.selected = Some((None, tmp.path().join("q")));
+        app.set_view(View::List, true);
+        let detail = render(&mut app);
+        assert!(detail.contains("Expected start  ~"), "{detail}");
+        assert!(detail.contains("Submitted"), "{detail}");
+        assert!(detail.contains("(80m ago)"), "{detail}");
+        assert!(detail.contains("Priority        15230"), "{detail}");
+        assert!(detail.contains("Dependency      afterany:100"), "{detail}");
+    }
+
+    #[test]
     fn sixel_image() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("a")).unwrap();
