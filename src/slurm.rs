@@ -6,13 +6,16 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Fields requested from squeue, separated by `|`
-const SQUEUE_FORMAT: &str = "%i|%T|%j|%P|%D|%M|%l|%R";
+/// Fields requested from squeue, separated by `|`; the reason (free text) comes last
+const SQUEUE_FORMAT: &str = "%i|%T|%j|%P|%D|%M|%l|%S|%e|%V|%Q|%E|%R";
+const SQUEUE_FIELDS: usize = 13;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Missing fields (from an older `simwatch --serve`) are empty
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Job {
     pub id: String,
     pub state: String,
@@ -22,6 +25,13 @@ pub struct Job {
     pub elapsed: String,
     pub limit: String,
     pub reason: String,
+    /// Pending: Slurm's estimate, if the scheduler made one. Otherwise: the actual start.
+    pub start: Option<DateTime<Utc>>,
+    /// Running: when the time limit is reached
+    pub end: Option<DateTime<Utc>>,
+    pub submit: Option<DateTime<Utc>>,
+    pub priority: String,
+    pub dependency: String,
 }
 
 /// The result of one successful squeue call
@@ -92,15 +102,33 @@ pub fn short_state(state: &str) -> &str {
     }
 }
 
+/// A squeue time such as `2026-10-09T14:34:13`, in the local time zone of the host
+/// that ran squeue. `N/A`, `Unknown` and anything else unparsable give `None`.
+pub fn parse_time(s: &str) -> Option<DateTime<Utc>> {
+    let t = NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H:%M:%S").ok()?;
+    Local
+        .from_local_datetime(&t)
+        .earliest()
+        .map(|t| t.with_timezone(&Utc))
+}
+
+/// Parses the output of [`SQUEUE_FORMAT`]. Times are converted to UTC here, on the
+/// host that ran squeue, so that they are right wherever they are shown.
 pub fn parse_squeue(output: &str) -> Vec<Job> {
     output
         .lines()
         .filter_map(|line| {
-            let f: Vec<&str> = line.trim().splitn(8, '|').map(str::trim).collect();
+            let f: Vec<&str> = line
+                .trim()
+                .splitn(SQUEUE_FIELDS, '|')
+                .map(str::trim)
+                .collect();
             if f.len() < 2 || f[0].is_empty() {
                 return None;
             }
             let get = |i: usize| f.get(i).copied().unwrap_or("").to_string();
+            let time = |i: usize| f.get(i).and_then(|s| parse_time(s));
+            let dependency = get(11);
             Some(Job {
                 id: get(0),
                 state: get(1),
@@ -109,7 +137,16 @@ pub fn parse_squeue(output: &str) -> Vec<Job> {
                 nodes: get(4),
                 elapsed: get(5),
                 limit: get(6),
-                reason: get(7),
+                start: time(7),
+                end: time(8),
+                submit: time(9),
+                priority: get(10),
+                dependency: if dependency == "(null)" {
+                    String::new()
+                } else {
+                    dependency
+                },
+                reason: get(12),
             })
         })
         .collect()
@@ -140,7 +177,9 @@ pub fn query(program: &str, timeout: Duration) -> Result<Snapshot, QueryError> {
         .unwrap_or_default();
     let mut cmd = Command::new(program);
     cmd.arg("--noheader")
-        .arg(format!("--format={SQUEUE_FORMAT}"));
+        .arg(format!("--format={SQUEUE_FORMAT}"))
+        // ISO times, whatever the user's environment says
+        .env("SLURM_TIME_FORMAT", "standard");
     if user.is_empty() {
         cmd.arg("--me");
     } else {
@@ -205,10 +244,10 @@ mod tests {
     use super::*;
 
     const OUT: &str = "\
-  123456|RUNNING|bbh-q1|amdq|1|1:02:03|1-00:00:00|cn101
-123457|PENDING|bbh-q2|amdq|2|0:00|1-00:00:00|(Priority)
-123458_[1-5]|PENDING|scan|amddebugq|1|0:00|1:00:00|(Resources)
-123459_3|RUNNING|scan2|amddebugq|1|0:10|1:00:00|cn7
+  123456|RUNNING|bbh-q1|amdq|1|1:02:03|1-00:00:00|2026-10-09T13:00:00|2026-10-10T13:00:00|2026-10-09T12:59:00|15230|(null)|cn101
+123457|PENDING|bbh-q2|amdq|2|0:00|1-00:00:00|2026-10-09T14:34:13|2026-10-10T14:34:13|2026-10-09T13:15:54|15000|afterany:123456|(Priority)
+123458_[1-5]|PENDING|scan|amddebugq|1|0:00|1:00:00|N/A|N/A|2026-10-09T13:15:54|100|(null)|(Resources)
+123459_3|RUNNING|scan2|amddebugq|1|0:10|1:00:00|2026-10-09T13:00:00|2026-10-09T14:00:00|2026-10-09T12:00:00|100|(null)|cn7
 garbage
 ";
 
@@ -220,6 +259,39 @@ garbage
         assert_eq!(jobs[0].id, "123456");
         assert_eq!(jobs[0].elapsed, "1:02:03");
         assert_eq!(jobs[0].reason, "cn101");
+        assert_eq!(jobs[0].priority, "15230");
+        assert_eq!(jobs[0].dependency, "");
+        assert_eq!(jobs[1].dependency, "afterany:123456");
+        assert_eq!(jobs[1].start, parse_time("2026-10-09T14:34:13"));
+        assert!(jobs[1].start.is_some());
+        assert_eq!(jobs[2].start, None);
+        assert!(jobs[2].submit.is_some());
+        // Too few fields leave the rest empty
+        let short = parse_squeue("1|PENDING");
+        assert_eq!(short[0].reason, "");
+        assert_eq!(short[0].start, None);
+    }
+
+    #[test]
+    fn times() {
+        let t = parse_time("2026-10-09T14:34:13").unwrap();
+        let local = t.with_timezone(&Local);
+        assert_eq!(
+            local.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-10-09 14:34:13"
+        );
+        assert_eq!(parse_time("N/A"), None);
+        assert_eq!(parse_time("Unknown"), None);
+        assert_eq!(parse_time(""), None);
+        assert_eq!(parse_time("14:34"), None);
+    }
+
+    #[test]
+    fn serde_old_server() {
+        // An older server sends jobs without the newer fields
+        let j: Job = serde_json::from_str(r#"{"id":"1","state":"PENDING","name":"a","partition":"q","nodes":"1","elapsed":"0:00","limit":"1:00","reason":"(Priority)"}"#).unwrap();
+        assert_eq!(j.reason, "(Priority)");
+        assert_eq!(j.start, None);
     }
 
     #[test]

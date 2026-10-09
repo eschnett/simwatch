@@ -107,10 +107,16 @@ simulation's fourth job, pending).
   terminals the less important columns (resources, wall time, speed, …)
   are left out.
 - **Cards:** a few lines per simulation, with the summary values and their
-  recent history as sparklines.
+  recent history as sparklines. A queued job shows when Slurm expects it to
+  start (`starts ~14:34 (in 78m)`).
 - **Detail:** everything, including a *History* section with a sparkline
   and the exponential growth rate of each recorded series, the earlier
-  Slurm jobs of the simulation, and its images.
+  Slurm jobs of the simulation, and its images. For a queued job: the
+  expected start, submit time, priority and dependency; for a running job:
+  when it started and when it reaches its time limit.
+
+The expected start is Slurm's own estimate from its backfill scheduler. It
+can change, and is often not known at all, in which case it is not shown.
 
 ## Configuration
 

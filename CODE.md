@@ -170,6 +170,14 @@ large output cannot block the child. It polls `try_wait` and kills the child
 at the timeout. `Snapshot::find` matches job ids exactly first, then by base
 id (`123_4`, `123_[1-5]` and `123+0` all have base `123`).
 
+Besides state, reason, elapsed time and limit, `squeue` is asked for the
+start, end and submit times, priority and dependency (`SQUEUE_FORMAT`); the
+reason comes last since it is free text. This replaces `scontrol show job`,
+which would need one call per job. squeue prints times as ISO dates
+(`SLURM_TIME_FORMAT=standard` is set for the call) in the local time zone
+of its host; `parse_squeue` converts them to UTC there, so remote times are
+right wherever they are shown. `N/A` (no start estimate) becomes `None`.
+
 ## Remote hosts (`remote/`)
 
 **Connection.** `Client::start` runs `ssh [ssh options] -T -o
@@ -209,6 +217,10 @@ Unknown message types become `Unknown` and are ignored.
   all directories in order (this ends a pass), the Slurm messages with the
   jobs, `image` followed by the raw file, `image_error`, `warning`, and
   `done` after a `once` request.
+
+`Job` is `#[serde(default)]`, so fields can be added to it without bumping
+`PROTOCOL`: a newer client fills the fields an older server does not send
+with defaults, and an older client ignores the extra ones.
 
 Status files travel as **raw text** and are parsed by the client
 (`State::apply`). The protocol therefore does not change with the status

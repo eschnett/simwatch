@@ -1,6 +1,6 @@
 //! The detail view: everything about one simulation, plus its images.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -11,7 +11,7 @@ use ratatui_image::{Resize, StatefulImage};
 use super::{App, ImageState, cards, fmt, health_style};
 use crate::format::{STATUS_FILE, Status};
 use crate::model::{Sim, growth_rate, location};
-use crate::slurm::Snapshot;
+use crate::slurm::{Job, Snapshot};
 
 const KEY_WIDTH: usize = 15;
 
@@ -115,6 +115,33 @@ fn kv(out: &mut Vec<Line<'static>>, key: &str, value: impl Into<String>) {
         Span::raw(format!("{:<KEY_WIDTH$} ", fmt::trunc(key, KEY_WIDTH))).dim(),
         Span::raw(value.into()),
     ]));
+}
+
+/// Times, priority and dependency of a job, from squeue
+fn job_details(out: &mut Vec<Line<'static>>, j: &Job, now: DateTime<Utc>) {
+    let at = |t: DateTime<Utc>| format!("{} ({})", fmt::local_time(t), fmt::relative(t, now));
+    let pending = j.state == "PENDING";
+    if pending {
+        if let Some(t) = j.start {
+            kv(out, "Expected start", format!("~{}", at(t)));
+        }
+        if let Some(t) = j.submit {
+            kv(out, "Submitted", at(t));
+        }
+        if !j.priority.is_empty() {
+            kv(out, "Priority", j.priority.clone());
+        }
+    } else {
+        if let Some(t) = j.start {
+            kv(out, "Started", at(t));
+        }
+        if let Some(t) = j.end {
+            kv(out, "Time limit at", at(t));
+        }
+    }
+    if !j.dependency.is_empty() {
+        kv(out, "Dependency", j.dependency.clone());
+    }
 }
 
 pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec<Line<'static>> {
@@ -282,6 +309,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
         section(&mut out, "Slurm");
         if let Some(id) = &s.job_id {
             let status = match (snap, sim.job(snap)) {
+                (_, Some(j)) if j.state == "PENDING" => {
+                    format!("{}  {}  time limit {}", j.state, j.reason, j.limit)
+                }
                 (_, Some(j)) => format!(
                     "{}  {}  elapsed {} of {}",
                     j.state, j.reason, j.elapsed, j.limit
@@ -293,6 +323,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
                 (None, None) => "(no squeue information)".into(),
             };
             kv(&mut out, "Job", format!("{id}  {status}"));
+            if let Some(j) = sim.job(snap) {
+                job_details(&mut out, j, now);
+            }
         }
         if let Some(n) = sim.job_number() {
             kv(&mut out, "Earlier jobs", s.previous_job_ids.join(", "));
@@ -305,14 +338,16 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
             kv(&mut out, "Partition", pt.clone());
         }
         if let Some(n) = &s.next_job_id {
-            let state = match snap {
-                Some(sn) => match sn.find(n) {
-                    Some(j) => format!("  {}  {}", j.state, j.reason),
-                    None => "  not in squeue".into(),
-                },
-                None => String::new(),
+            let job = snap.and_then(|sn| sn.find(n));
+            let state = match (snap, job) {
+                (_, Some(j)) => format!("  {}  {}", j.state, j.reason),
+                (Some(_), None) => "  not in squeue".into(),
+                (None, None) => String::new(),
             };
             kv(&mut out, "Next job", format!("{n}{state}"));
+            if let Some(j) = job {
+                job_details(&mut out, j, now);
+            }
         }
     }
 

@@ -112,6 +112,27 @@ pub fn local_time(t: DateTime<Utc>) -> String {
         .to_string()
 }
 
+/// Wall-clock time of day, with the date unless it is the same day as `now`:
+/// `14:34` or `Oct 10 14:34`
+pub fn clock(t: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let (t, now) = (t.with_timezone(&Local), now.with_timezone(&Local));
+    if t.date_naive() == now.date_naive() {
+        t.format("%H:%M").to_string()
+    } else {
+        t.format("%b %-d %H:%M").to_string()
+    }
+}
+
+/// Relative to `now`: `in 78m` or `3h ago`
+pub fn relative(t: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let secs = (t - now).num_seconds() as f64;
+    if secs > 0.0 {
+        format!("in {}", age(secs))
+    } else {
+        format!("{} ago", age(-secs))
+    }
+}
+
 /// A generic TOML value, without quotes around strings
 pub fn value(v: &Value) -> String {
     match v {
@@ -199,6 +220,27 @@ pub fn trunc(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn times() {
+        let now = Local
+            .with_ymd_and_hms(2026, 10, 9, 13, 16, 0)
+            .unwrap()
+            .to_utc();
+        let t = Local
+            .with_ymd_and_hms(2026, 10, 9, 14, 34, 13)
+            .unwrap()
+            .to_utc();
+        assert_eq!(clock(t, now), "14:34");
+        assert_eq!(relative(t, now), "in 78m");
+        assert_eq!(relative(now, t), "78m ago");
+        let t = Local
+            .with_ymd_and_hms(2026, 10, 10, 9, 5, 0)
+            .unwrap()
+            .to_utc();
+        assert_eq!(clock(t, now), "Oct 10 09:05");
+    }
 
     #[test]
     fn numbers() {
