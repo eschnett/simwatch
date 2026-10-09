@@ -88,6 +88,12 @@ would be called only for jobs that just disappeared.
   are small enough.
 - Ask for a password inside the display instead of giving the terminal back
   to ssh (`SSH_ASKPASS`).
+- Restart the server of a connected host. The remote simwatch reads its
+  configuration file only when it starts, so after fixing `squeue_program`
+  there (or installing a new simwatch) SimWatch must be restarted, since `c`
+  reconnects only lost hosts. `c` could also restart the servers of hosts
+  whose `squeue` is off, or a separate key could restart all servers. Each
+  restart is a new ssh login, which may ask for MFA.
 
 ## Small things
 
