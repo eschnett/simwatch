@@ -136,11 +136,11 @@ stale_factor = 3           # stale after stale_factor × update_interval ...
 stale_floor = 180          # ... but never before this many seconds
 default_update_interval = 60
 
-max_depth = 5              # how deep to search below each root
+max_depth = 8              # how deep to search below each root
 max_dirs = 5000            # directories visited per scan, at most
 max_entries_per_dir = 2000 # entries read per directory, at most
 max_sims = 500
-skip_dirs = [".git", "target", "node_modules", "__pycache__"]
+skip_dirs = [".git", "target", "node_modules", "__pycache__"]  # names; * and ? work
 
 images = "sixel"           # or "none"
 # font_size = [9, 18]      # terminal cell size in pixels, if not detected
@@ -149,6 +149,16 @@ ssh = ["ssh"]              # ssh command and options, e.g. ["ssh", "-C"]
 remote_program = "simwatch" # simwatch on remote hosts, e.g. "~/.cargo/bin/simwatch"
 auto_reconnect = true      # reconnect lost hosts if no password is needed
 ```
+
+A scan searches breadth-first, so simulations near a root are found first.
+If a root also holds large trees that are not simulations (build
+directories, a Julia depot), a scan can visit `max_dirs` directories before
+it reaches the simulations. The status bar then names the directories below
+the root that used up most of the budget, e.g. `max_dirs = 5000 reached,
+most in ygg15133 (2849), …`; `simwatch --print DIR` shows the full message.
+Add them to `skip_dirs`, which replaces the default list, e.g.
+`skip_dirs = [".git", "target", "node_modules", "__pycache__", "ygg*",
+"julia-depot"]`, or choose narrower roots.
 
 ## Remote hosts
 
