@@ -124,10 +124,16 @@ state" (most urgent first). Keep that in mind when adding variants.
 - It uses `DirEntry::file_type()`, which comes from `d_type` and does not
   follow symlinks. Symlinked directories are therefore never entered, which
   rules out loops. A symlinked `simwatch.toml` is accepted.
-- Hidden directories and `skip_dirs` are skipped.
+- Hidden directories and `skip_dirs` are skipped. Entries of `skip_dirs`
+  with `*` or `?` are glob patterns matched against the whole name
+  (`glob_match`); the others must match exactly.
 - Caps: `max_depth`, `max_dirs`, `max_entries_per_dir`, `max_sims`. Hitting
   a cap produces a warning in `ScanResult::warnings`, shown in the status
   bar. Hitting `max_depth` is normal and is not reported.
+- The scan counts the directories visited below each directory just under
+  a root. The `max_dirs` warning names the largest of these (up to three,
+  each at least a tenth of `max_dirs`), early in the message because the
+  status bar truncates warnings at 60 characters.
 - Unreadable directories below a root are silently ignored (usually
   permissions). Only problems with the roots themselves are reported.
 
