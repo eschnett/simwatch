@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub images: Option<ImageMode>,
 
+    /// Adapt images to a light or dark terminal background
+    #[arg(long, value_enum)]
+    pub image_theme: Option<ImageTheme>,
+
     /// Do not call squeue
     #[arg(long)]
     pub no_slurm: bool,
@@ -55,6 +59,18 @@ pub struct Cli {
 pub enum ImageMode {
     Sixel,
     None,
+}
+
+/// The terminal background that images are adapted to
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageTheme {
+    /// Show light images on a light background as they are, flip dark ones
+    Light,
+    /// Show dark images as they are, flip light ones
+    Dark,
+    /// Show every image as it is
+    AsIs,
 }
 
 /// The contents of the configuration file; every setting is optional
@@ -77,6 +93,7 @@ struct FileConfig {
     max_sims: Option<usize>,
     skip_dirs: Option<Vec<String>>,
     images: Option<ImageMode>,
+    image_theme: Option<ImageTheme>,
     /// Terminal cell size in pixels, overriding detection
     font_size: Option<[u16; 2]>,
     ssh: Option<Vec<String>>,
@@ -107,6 +124,7 @@ pub struct Config {
     pub health: HealthParams,
     pub limits: Limits,
     pub images: ImageMode,
+    pub image_theme: ImageTheme,
     /// Terminal cell size in pixels; detected if not set
     pub font_size: Option<[u16; 2]>,
     /// The ssh command and its options
@@ -137,6 +155,7 @@ impl Default for Config {
             health: HealthParams::default(),
             limits: Limits::default(),
             images: ImageMode::Sixel,
+            image_theme: ImageTheme::AsIs,
             font_size: None,
             ssh: vec!["ssh".into()],
             remote_program: "simwatch".into(),
@@ -240,6 +259,7 @@ impl Config {
                 skip_dirs: f.skip_dirs.unwrap_or(dl.skip_dirs),
             },
             images: cli.images.or(f.images).unwrap_or(d.images),
+            image_theme: cli.image_theme.or(f.image_theme).unwrap_or(d.image_theme),
             font_size: f.font_size.or(d.font_size),
             ssh: f.ssh.filter(|s| !s.is_empty()).unwrap_or(d.ssh),
             remote_program: f.remote_program.unwrap_or(d.remote_program),
@@ -289,6 +309,7 @@ roots = ["~/runs", "/scratch/x"]
 refresh_interval = 10
 max_depth = 7
 images = "none"
+image_theme = "as-is"
 "#,
         )
         .unwrap();
@@ -298,10 +319,12 @@ images = "none"
         assert_eq!(c.refresh_interval, Duration::from_secs(30));
         assert_eq!(c.limits.max_depth, 7);
         assert_eq!(c.images, ImageMode::None);
+        assert_eq!(c.image_theme, ImageTheme::AsIs);
         assert!(!c.slurm);
 
-        let cli = Cli::parse_from(["simwatch", "a", "b"]);
+        let cli = Cli::parse_from(["simwatch", "--image-theme", "light", "a", "b"]);
         let c = Config::merge(&cli, FileConfig::default());
+        assert_eq!(c.image_theme, ImageTheme::Light);
         assert_eq!(c.roots, [PathBuf::from("a"), PathBuf::from("b")]);
         assert_eq!(c.refresh_interval, Duration::from_secs(60));
         assert!(c.remotes.is_empty());

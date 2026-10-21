@@ -26,6 +26,20 @@ size fits the terminal. A black hole track could come the same way, as
 `x` and `y` series. This is sharper than a scaled-down image and needs no
 graphics protocol.
 
+## Image formats and themes
+
+- **PDF thumbnails:** no renderer fits. pdfium and poppler are C/C++
+  libraries to build on every host, MuPDF is AGPL, calling `pdftoppm` needs a
+  process per image and a timeout, and the pure-Rust renderers are young.
+  Codes that can write PDF can usually write SVG or PNG as well.
+- **Detecting the terminal's background:** `image_theme` could default to
+  the background colour the terminal reports for `OSC 11`. That is another
+  query that may never be answered (see the pitfalls in CODE.md).
+- **A key to toggle `image_theme`** in the detail view, for images the flip
+  does not suit; it would empty the image cache and reload.
+- **An SVG helper in the Julia writer:** a small function that writes a line
+  plot (axes, series, labels) as SVG, for codes without a plotting package.
+
 ## Other graphics protocols
 
 - **Kitty graphics protocol:** supported by kitty, Ghostty and WezTerm. The

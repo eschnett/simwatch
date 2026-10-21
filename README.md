@@ -49,6 +49,10 @@ simwatch /mnt/beegfs/$USER/runs ~/runs
 - `simwatch --print DIR` prints the list once as plain text and exits.
 - `simwatch --images none` turns off images. Sixel images need a terminal
   that supports sixel, such as WezTerm.
+- `simwatch --image-theme light` shows images dark-on-white, for a light
+  terminal: images drawn on a dark background are flipped (black and white
+  swap, colours keep their hue). `dark` does the opposite, and `as-is`
+  (the default) shows images as they are.
 - `simwatch --help` lists all options.
 
 ### Keys
@@ -143,6 +147,7 @@ max_sims = 500
 skip_dirs = [".git", "target", "node_modules", "__pycache__"]  # names; * and ? work
 
 images = "sixel"           # or "none"
+image_theme = "as-is"      # "light" or "dark": adapt images to the terminal
 # font_size = [9, 18]      # terminal cell size in pixels, if not detected
 
 ssh = ["ssh"]              # ssh command and options, e.g. ["ssh", "-C"]
@@ -236,7 +241,8 @@ SimWatch is meant to run for days on a shared login node:
   the remote login node, and exits when its ssh connection ends.
 - **Size limits.** Status files over 128 KiB are not read. Images over 1 MiB
   or 1024×1024 pixels are not read, and images are loaded only for the
-  simulation shown in the detail view.
+  simulation shown in the detail view. SVG images read no other files and
+  no system fonts.
 
 ## Writing status files
 
@@ -257,3 +263,6 @@ cargo run -- /tmp/simwatch-demo
 ```
 
 [IDEAS.md](IDEAS.md) collects ideas for later; [CODE.md](CODE.md) describes the code internals.
+
+SimWatch includes a subset of the DejaVu Sans font for text in SVG images;
+see [assets/LICENSE-DejaVu.txt](assets/LICENSE-DejaVu.txt) for its licence.

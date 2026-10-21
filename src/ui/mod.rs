@@ -168,7 +168,9 @@ pub struct App {
 impl App {
     /// `fetch` gets image files from remote hosts
     pub fn new(cfg: Config, picker: Option<Picker>, fetch: Fetch) -> App {
-        let loader = picker.is_some().then(|| Loader::start(fetch));
+        let loader = picker
+            .is_some()
+            .then(|| Loader::start(fetch, cfg.image_theme));
         let sources = cfg
             .sources()
             .into_iter()

@@ -114,10 +114,26 @@ An array of tables, at most 10:
 | `title` | string | Short title |
 | `description` | string | One or two sentences |
 
-Images are thumbnails, shown as sixel graphics in the detail view. Use PNG
-(JPEG works too). Keep them small: **at most 512×512 pixels, about 400×300 is
-best**, with a dark background. SimWatch refuses files over 1 MiB or
-1024×1024 pixels. Replace image files atomically too (write, then rename),
+Images are thumbnails, shown as sixel graphics in the detail view. SimWatch
+recognises the format from the file's contents, not its name:
+
+- **PNG** or **JPEG**, from a plotting package;
+- **SVG**, which is easy to write by hand without any plotting package:
+  lines, rectangles and `<text>`. Text is drawn in a built-in font (DejaVu
+  Sans with Latin, Greek, arrows and mathematical symbols) whatever
+  `font-family` asks for. The SVG must be self-contained: `<image>` may only
+  embed `data:` URLs, never refer to other files. SVG is drawn 512 pixels
+  wide or high, whichever side is longer;
+- **PPM/PGM** (binary `P6`/`P5`), also easy to write by hand: a header
+  `P6\n400 300\n255\n`, then 3 bytes (RGB) per pixel, row by row. 400×300
+  is 360 KB;
+- **WebP**.
+
+Keep raster images small: **at most 512×512 pixels, about 400×300 is
+best**. SimWatch refuses files over 1 MiB or 1024×1024 pixels. Draw on a
+white or a black background, or a transparent one; SimWatch shows images as
+they are or adapts them to a light or dark terminal, as its user configures
+(`image_theme`). Replace image files atomically too (write, then rename),
 before rewriting `simwatch.toml`.
 
 ## Problem-specific keys
@@ -359,9 +375,13 @@ of `src/` can still include it there, since it needs nothing else.
    [One simulation, several jobs](#one-simulation-several-jobs)), and
    `simwatch_mark DIR failed "…"` when the job script sees a non-zero exit
    code.
-8. **Images (optional).** Only if the code already makes plots: save small
-   PNG thumbnails (≤ 512×512, dark background) into the run directory, write
-   them atomically, and list them under `[[images]]` with relative paths.
+8. **Images (optional).** If the code already makes plots, save small PNG
+   thumbnails (≤ 512×512) into the run directory. Without a plotting
+   package, write SVG text by hand (lines, `<text>`, no external files)
+   rather than adding a dependency. A plain white, black or transparent
+   background works best; SimWatch adapts images to the user's terminal.
+   Write them atomically, and list them under `[[images]]` with relative
+   paths.
 9. **Check.** Run a short simulation and look at it with
    `simwatch --print <dir>`; the run should appear with its name, state and
    progress.

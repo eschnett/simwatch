@@ -6,6 +6,7 @@ mod format;
 mod images;
 mod model;
 mod monitor;
+mod recolor;
 mod remote;
 mod slurm;
 mod ui;
