@@ -193,6 +193,14 @@ fn write_bbh(dir: &Path, t: f64) {
                     s("log10 of the L2 norm of the Hamiltonian constraint vs. time"),
                 ),
             ])),
+            Value::Table(table(&[
+                ("file", s("plots/separation.svg")),
+                ("title", s("Separation")),
+                (
+                    "description",
+                    s("SVG drawn for a white background, with a transparent one"),
+                ),
+            ])),
         ]),
     );
     st.insert(
@@ -245,6 +253,42 @@ fn write_bbh(dir: &Path, t: f64) {
 
     write_png(&dir.join("plots/track.png"), &track_plot(t));
     write_png(&dir.join("plots/constraints.png"), &constraint_plot(t));
+    write_atomic(
+        &dir.join("plots/separation.svg"),
+        separation_svg(t).as_bytes(),
+    );
+}
+
+/// A plot written as SVG text by hand, as a simulation code without a
+/// plotting package might
+fn separation_svg(t: f64) -> String {
+    let (x0, x1, y0, y1) = (50.0, 380.0, 250.0, 30.0);
+    let points: Vec<String> = (0..=100)
+        .map(|k| k as f64 / 100.0 * t)
+        .map(|tk| {
+            let x = x0 + tk / T_END * (x1 - x0);
+            let y = y0 + orbit(tk).0 / 11.0 * (y1 - y0);
+            format!("{x:.1},{y:.1}")
+        })
+        .collect();
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" font-family="sans-serif" font-size="13">
+  <rect x="{x0}" y="{y1}" width="{w}" height="{h}" fill="none" stroke="black"/>
+  <polyline fill="none" stroke="#1f77b4" stroke-width="2" points="{points}"/>
+  <text x="{xm}" y="285" text-anchor="middle">t / M</text>
+  <text x="25" y="{ym}" transform="rotate(-90 25 {ym})" text-anchor="middle">r / M</text>
+  <text x="{xl}" y="50">r = {r:.2} M, Ω ≈ {omega:.3} / M</text>
+</svg>
+"##,
+        w = x1 - x0,
+        h = y0 - y1,
+        points = points.join(" "),
+        xm = (x0 + x1) / 2.0,
+        ym = (y0 + y1) / 2.0,
+        xl = x0 + 10.0,
+        r = orbit(t).0,
+        omega = orbit(t).0.powf(-1.5),
+    )
 }
 
 fn ham_l2(t: f64) -> f64 {
@@ -273,7 +317,23 @@ fn write_worker(dir: &Path, w: i64, t: f64) {
         "resources".into(),
         Value::Table(table(&[("threads", i(8))])),
     );
+    st.insert(
+        "images".into(),
+        Value::Array(vec![Value::Table(table(&[
+            ("file", s("residual.ppm")),
+            ("title", s("Residual")),
+            ("description", s("PPM drawn for a white background")),
+        ]))]),
+    );
     write_status(dir, &st);
+    write_atomic(&dir.join("residual.ppm"), &ppm(&residual_plot(w, t)));
+}
+
+/// A binary PPM file: a short header, then the pixels
+fn ppm(img: &RgbImage) -> Vec<u8> {
+    let mut bytes = format!("P6\n{} {}\n255\n", img.width(), img.height()).into_bytes();
+    bytes.extend_from_slice(img.as_raw());
+    bytes
 }
 
 fn write_static(root: &Path) {
@@ -526,6 +586,23 @@ fn track_plot(t: f64) -> RgbImage {
     if let Some([p1, p2]) = prev {
         dot(&mut img, p1.0 - 3.0, p1.1 - 3.0, ORANGE, 7);
         dot(&mut img, p2.0 - 3.0, p2.1 - 3.0, CYAN, 7);
+    }
+    img
+}
+
+fn residual_plot(w: i64, t: f64) -> RgbImage {
+    let mut img = RgbImage::from_pixel(WIDTH, HEIGHT, Rgb([255, 255, 255]));
+    frame(&mut img, 10.0);
+    let (x0, x1, y0, y1) = (10.0, WIDTH as f64 - 11.0, HEIGHT as f64 - 11.0, 10.0);
+    let mut prev = None;
+    for k in 0..=(x1 - x0) as usize {
+        let tk = k as f64 / (x1 - x0) * t;
+        let v = (-tk / (20.0 * w as f64)).exp() * (1.0 + 0.3 * (tk / 3.0).sin());
+        let p = (x0 + k as f64, y0 + v / 1.4 * (y1 - y0));
+        if let Some(q) = prev {
+            line(&mut img, q, p, Rgb([200, 30, 30]), 2);
+        }
+        prev = Some(p);
     }
     img
 }

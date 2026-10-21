@@ -45,7 +45,8 @@ directories first, if there are any, then each host.
 | `src/remote/serve.rs` | `simwatch --serve`, the remote side |
 | `src/remote/client.rs` | The local side of a remote host: the ssh connection, reconnecting, image requests |
 | `src/slurm.rs` | Run and parse `squeue`; `Snapshot` with job lookup |
-| `src/images.rs` | Image size limits (`read_image_bytes`, `decode_image`) and the image loader thread |
+| `src/images.rs` | Image size limits (`read_image_bytes`, `decode_image`), SVG rendering, and the image loader thread |
+| `src/recolor.rs` | `adapt`: make images opaque and flip them for a light or dark terminal (`image_theme`) |
 | `src/ui/mod.rs` | `App` state, key handling, header and status bar, the event loop `run` |
 | `src/ui/list.rs` | List view: the `Col` enum, `columns()` (which columns to show), `cell()` (one cell's text), shared with the cards and `--print` (`text()`) |
 | `src/ui/cards.rs` | Card view |
@@ -245,7 +246,31 @@ directories, on their own thread; the client decodes them with
 
 **Images.** The `Loader` thread loads local images itself and asks a remote
 host through `Monitor::image_fetch`, which sends the request to the host's
-control thread and waits (at most 60 s) for the bytes.
+control thread and waits (at most 60 s) for the bytes. It decodes them and
+passes them through `recolor::adapt`, so the UI only gets opaque RGB images.
+
+`decode_image` takes anything whose first non-blank byte is `<` as SVG;
+everything else goes to the `image` crate, which guesses the format (PNG,
+JPEG, WebP, PNM) from the contents. SVG is parsed by `usvg` and drawn by
+`resvg` with the longer side `SVG_SIZE` pixels. `svg_options` keeps it
+self-contained: the only font is the subset of DejaVu Sans in `assets/`
+(built in with `include_bytes!`, and every generic family maps to it),
+external `<image>` references resolve to nothing, and embedded `data:`
+images are drawn only if they are SVG or their header says at most
+`MAX_IMAGE_DIM` pixels. resvg's default features are off: `system-fonts`
+would scan the font directories, and `memmap-fonts` would map them.
+
+`recolor::adapt` finds the background an image was drawn for: the most
+common colour of its border, or, if the border is transparent, white or
+black depending on whether the ink touching the transparent area is mostly
+near black or near white. It composites the image onto that background. If
+the theme wants the other kind of background, every pixel is split into
+that background and full-strength ink with a coverage (as GIMP's "colour to
+alpha" does), the ink is recoloured in OKLab (grey becomes its opposite,
+coloured ink keeps its hue at lightness at most or at least 0.6), and
+drawn on white or black with the same coverage. This keeps anti-aliased
+edges smooth and makes the background exactly white or black. Results are
+cached per colour, since plots have few.
 
 ## UI (`ui/`)
 
@@ -312,12 +337,14 @@ These cost time to find; keep them in mind.
 
 ## Testing
 
-`cargo test` runs about 45 unit tests, all in-process and fast:
+`cargo test` runs about 55 unit tests, all in-process and fast:
 - parsing edge cases;
 - health states using a fixed clock;
 - `squeue` parsing, the missing-binary case, and the timeout case;
 - discovery limits on temporary directory trees, including symlink loops;
-- image limits and path confinement;
+- image limits and path confinement; WebP, PNM and SVG decoding, SVG
+  without external files or system fonts;
+- recolouring: backgrounds, hues, anti-aliased edges, transparent images;
 - rendering of every view into ratatui's `TestBackend`;
 - an end-to-end sixel test: load a PNG through the loader thread, render
   the detail view, and find `ESC P` in the buffer;
