@@ -161,7 +161,11 @@ fn write_bbh(dir: &Path, t: f64) {
     );
     st.insert(
         "slurm".into(),
-        Value::Table(table(&[("job_id", s("1234567")), ("partition", s("amdq"))])),
+        Value::Table(table(&[
+            ("job_id", s("1234567")),
+            ("partition", s("amdq")),
+            ("cluster", s("symmetry")),
+        ])),
     );
     let bh = |name: &str, pos: [f64; 3], chi: f64| {
         Value::Table(table(&[
@@ -417,7 +421,12 @@ fn write_static(root: &Path) {
     ]);
     st.insert(
         "slurm".into(),
-        Value::Table(table(&[("job_id", s("1234601")), ("partition", s("amdq"))])),
+        // On another cluster, with longer job ids
+        Value::Table(table(&[
+            ("job_id", s("12346010")),
+            ("partition", s("compute")),
+            ("cluster", s("trillium")),
+        ])),
     );
     write_status(&root.join("bbh-q2"), &st);
 

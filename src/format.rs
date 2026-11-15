@@ -120,6 +120,8 @@ pub struct SlurmInfo {
     pub job_id: Option<String>,
     pub job_name: Option<String>,
     pub partition: Option<String>,
+    /// `$SLURM_CLUSTER_NAME`
+    pub cluster: Option<String>,
     /// Submitted, but has not written yet
     pub next_job_id: Option<String>,
     /// Earlier jobs of this simulation, oldest first
@@ -237,6 +239,7 @@ fn status_from_table(t: &mut Table) -> Status {
             job_id: take_id(&mut s, "job_id"),
             job_name: take_string(&mut s, "job_name"),
             partition: take_string(&mut s, "partition"),
+            cluster: take_string(&mut s, "cluster"),
             next_job_id: take_id(&mut s, "next_job_id"),
             previous_job_ids: take_if(&mut s, "previous_job_ids", |v| {
                 v.as_array()?.iter().map(as_id).collect()
@@ -545,6 +548,7 @@ extra_progress = "x"
 
 [slurm]
 job_id = 123456
+cluster = "trillium"
 
 [[black_holes]]
 name = "BH1"
@@ -575,6 +579,7 @@ coeffs = [1, 2, 3]
         assert_eq!(st.progress.time, Some(12.5));
         assert_eq!(st.progress.time_end, Some(100.0));
         assert_eq!(st.slurm.job_id.as_deref(), Some("123456"));
+        assert_eq!(st.slurm.cluster.as_deref(), Some("trillium"));
         assert_eq!(st.black_holes.len(), 1);
         assert_eq!(st.black_holes[0].spin, Some(vec![0.0, 0.0, 0.6]));
         assert_eq!(st.black_holes[0].position, Some(vec![1.0, 0.0, 0.0]));

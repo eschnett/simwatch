@@ -99,15 +99,19 @@ version of the status file could not be read, and the previous one is shown.
 
 A simulation that has been resubmitted is judged by the job it is waiting
 for. The Job column then shows that job (e.g. `1234602 PD #4`: the
-simulation's fourth job, pending).
+simulation's fourth job, pending). The Job, Cluster and Host columns are as
+wide as their contents need, and the job states line up.
 
 ### What the views show
 
-- **List:** one line per simulation. A *Host* column appears when the
-  simulations come from more than one host, a *Group* column when some
-  simulation has a `group`, and a *Summary* column with its headline values
-  when some simulation names them in `summary`; an arrow (↑ ↓ →) shows
-  their trend when the simulation records a `[history]`. On narrow
+- **List:** one line per simulation. A *Cluster* column appears when the
+  simulations run on more than one cluster: the `cluster` in the status
+  file, else the remote host (`local` for local directories). A *Host*
+  column appears when the simulations come from more than one host and
+  the Cluster column does not already name them all, a *Group* column when
+  some simulation has a `group`, and a *Summary* column with its headline
+  values when some simulation names them in `summary`; an arrow (↑ ↓ →)
+  shows their trend when the simulation records a `[history]`. On narrow
   terminals the less important columns (resources, wall time, speed, …)
   are left out.
 - **Cards:** a few lines per simulation, with the summary values and their

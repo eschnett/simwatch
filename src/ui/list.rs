@@ -27,6 +27,7 @@ pub enum Col {
     Eta,
     Wall,
     Upd,
+    Cluster,
     Job,
     Res,
     Summary,
@@ -47,17 +48,25 @@ impl Col {
             Col::Eta => "ETA",
             Col::Wall => "Wall",
             Col::Upd => "Upd",
+            Col::Cluster => "Cluster",
             Col::Job => "Job",
             Col::Res => "Res",
             Col::Summary => "Summary",
         }
     }
 
-    fn width(self) -> Constraint {
+    /// The width, given the widest cell of the column (without the header)
+    fn width(self, content: usize) -> Constraint {
+        let fit = |max: usize| {
+            let n = content.max(self.header().chars().count()).min(max);
+            Constraint::Length(n as u16)
+        };
         match self {
             Col::Glyph => Constraint::Length(1),
             Col::Name | Col::Summary => Constraint::Fill(1),
-            Col::Host => Constraint::Length(12),
+            Col::Host | Col::Cluster => fit(16),
+            // Job ids have 6 to 8 digits, or more for array jobs
+            Col::Job => fit(24),
             Col::Group => Constraint::Length(14),
             Col::State => Constraint::Length(11),
             Col::Iter => Constraint::Length(8),
@@ -67,13 +76,12 @@ impl Col {
             Col::Eta => Constraint::Length(5),
             Col::Wall => Constraint::Length(9),
             Col::Upd => Constraint::Length(4),
-            Col::Job => Constraint::Length(16),
             Col::Res => Constraint::Length(9),
         }
     }
 
     /// Columns that give way first when the terminal is too narrow
-    const DROP_ORDER: [Col; 8] = [
+    const DROP_ORDER: [Col; 9] = [
         Col::Res,
         Col::Wall,
         Col::Speed,
@@ -81,12 +89,13 @@ impl Col {
         Col::Host,
         Col::Group,
         Col::Eta,
+        Col::Cluster,
         Col::Job,
     ];
 
     /// Least useful width
-    fn min_width(self) -> u16 {
-        match self.width() {
+    fn min_width(self, content: usize) -> u16 {
+        match self.width(content) {
             Constraint::Length(n) => n,
             _ if self == Col::Summary => 24,
             _ => 16,
@@ -100,13 +109,23 @@ impl Col {
 }
 
 /// The columns to show: Group and Summary only if some simulation has one,
-/// Host only if the simulations come from more than one host
+/// Cluster only if the simulations run on more than one cluster, and Host
+/// only if they come from more than one host that Cluster does not name
 pub fn columns<'a>(sims: impl IntoIterator<Item = &'a Sim> + Clone) -> Vec<Col> {
     let mut cols = vec![Col::Glyph, Col::Name];
-    let mut hosts = sims.clone().into_iter().map(|s| &s.host);
-    if let Some(first) = hosts.next()
-        && hosts.any(|h| h != first)
-    {
+    let differ = |v: Vec<Option<&str>>| v.iter().any(|x| *x != v[0]);
+    let clusters = differ(sims.clone().into_iter().map(Sim::cluster).collect());
+    let hosts = differ(
+        sims.clone()
+            .into_iter()
+            .map(|s| s.host.as_deref())
+            .collect(),
+    );
+    let unnamed = sims
+        .clone()
+        .into_iter()
+        .any(|s| s.host.is_some() && s.cluster() != s.host.as_deref());
+    if hosts && (unnamed || !clusters) {
         cols.push(Col::Host);
     }
     if sims.clone().into_iter().any(|s| s.st().group.is_some()) {
@@ -121,9 +140,11 @@ pub fn columns<'a>(sims: impl IntoIterator<Item = &'a Sim> + Clone) -> Vec<Col> 
         Col::Eta,
         Col::Wall,
         Col::Upd,
-        Col::Job,
-        Col::Res,
     ]);
+    if clusters {
+        cols.push(Col::Cluster);
+    }
+    cols.extend([Col::Job, Col::Res]);
     if sims.into_iter().any(|s| !s.st().summary.is_empty()) {
         cols.push(Col::Summary);
     }
@@ -181,6 +202,8 @@ pub fn cell(col: Col, sim: &Sim, h: Health, now: DateTime<Utc>, snap: Option<&Sn
             _ => String::new(),
         },
         Col::Upd => sim.age(now).map(fmt::age).unwrap_or_default(),
+        // Without a cluster, the simulation is in a local directory
+        Col::Cluster => sim.cluster().unwrap_or("local").to_string(),
         Col::Job => match sim.shown_job() {
             Some((id, n, next)) => {
                 let state = match snap.map(|s| s.find(id)) {
@@ -218,6 +241,24 @@ pub fn cell(col: Col, sim: &Sim, h: Health, now: DateTime<Utc>, snap: Option<&Sn
             res.join(" ")
         }
         Col::Summary => summary_text(sim),
+    }
+}
+
+/// Pads the job ids in the Job column of `rows` to one width, so that the job
+/// states after them line up
+fn align_jobs(cols: &[Col], rows: &mut [Vec<String>]) {
+    let Some(j) = cols.iter().position(|c| *c == Col::Job) else {
+        return;
+    };
+    let id_width = |s: &str| s.split(' ').next().unwrap_or("").chars().count();
+    let width = rows.iter().map(|r| id_width(&r[j])).max().unwrap_or(0);
+    for r in rows {
+        let cell = &mut r[j];
+        if let Some(rest) = cell.find(' ').map(|k| cell.split_off(k)) {
+            let pad = width - id_width(cell);
+            cell.push_str(&" ".repeat(pad));
+            cell.push_str(&rest);
+        }
     }
 }
 
@@ -259,6 +300,7 @@ pub fn text(
             .map(|c| cell(*c, sim, *h, now, snaps.get(&sim.host)))
             .collect()
     }));
+    align_jobs(&cols, &mut table[1..]);
     let mut width = vec![0usize; cols.len()];
     for row in &table {
         for (w, c) in width.iter_mut().zip(row) {
@@ -319,32 +361,52 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         return;
     }
     let now = Utc::now();
-    let mut cols = columns(vis.iter().map(|(i, _)| &app.sims[*i]));
-    let needed = |cols: &[Col]| -> u16 { cols.iter().map(|c| c.min_width() + 1).sum() };
+    let all = columns(vis.iter().map(|(i, _)| &app.sims[*i]));
+    let mut texts: Vec<Vec<String>> = vis
+        .iter()
+        .map(|(i, h)| {
+            let sim = &app.sims[*i];
+            let snap = app.snap(sim);
+            all.iter().map(|c| cell(*c, sim, *h, now, snap)).collect()
+        })
+        .collect();
+    align_jobs(&all, &mut texts);
+    let content: Vec<usize> = (0..all.len())
+        .map(|j| {
+            texts
+                .iter()
+                .map(|r| r[j].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut keep: Vec<usize> = (0..all.len()).collect();
+    let needed =
+        |keep: &[usize]| -> u16 { keep.iter().map(|&j| all[j].min_width(content[j]) + 1).sum() };
     for drop in Col::DROP_ORDER {
-        if needed(&cols) <= area.width {
+        if needed(&keep) <= area.width {
             break;
         }
-        cols.retain(|c| *c != drop);
+        keep.retain(|&j| all[j] != drop);
     }
     let rows: Vec<Row> = vis
         .iter()
-        .map(|(i, h)| {
+        .zip(texts)
+        .map(|((_, h), mut text)| {
             let hs = health_style(*h);
-            let sim = &app.sims[*i];
-            let snap = app.snap(sim);
-            Row::new(cols.iter().map(|c| {
-                let cell = Cell::from(cell(*c, sim, *h, now, snap));
-                match c {
+            Row::new(keep.iter().map(|&j| {
+                let cell = Cell::from(std::mem::take(&mut text[j]));
+                match all[j] {
                     Col::Glyph | Col::State => cell.style(hs),
                     Col::Name => cell.bold(),
-                    Col::Host | Col::Group => cell.dim(),
+                    Col::Host | Col::Group | Col::Cluster => cell.dim(),
                     _ => cell,
                 }
             }))
         })
         .collect();
-    let table = Table::new(rows, cols.iter().map(|c| c.width()))
+    let cols: Vec<Col> = keep.iter().map(|&j| all[j]).collect();
+    let table = Table::new(rows, keep.iter().map(|&j| all[j].width(content[j])))
         .header(
             Row::new(cols.iter().map(|c| c.header()))
                 .style(Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
@@ -354,4 +416,20 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
     let pos = app.selected_pos(&vis);
     app.table_state.select(pos);
     f.render_stateful_widget(table, area, &mut app.table_state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_states_line_up() {
+        let mut rows: Vec<Vec<String>> = ["27444520 PD", "598661 gone #2", "598662", ""]
+            .iter()
+            .map(|j| vec!["x".to_string(), j.to_string()])
+            .collect();
+        align_jobs(&[Col::Name, Col::Job], &mut rows);
+        let jobs: Vec<&str> = rows.iter().map(|r| r[1].as_str()).collect();
+        assert_eq!(jobs, ["27444520 PD", "598661   gone #2", "598662", ""]);
+    }
 }

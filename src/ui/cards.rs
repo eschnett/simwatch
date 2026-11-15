@@ -113,6 +113,11 @@ fn card(f: &mut Frame, area: Rect, sim: &Sim, h: Health, snap: Option<&Snapshot>
     if !job.is_empty() {
         jobline.push(dim("job "));
         jobline.push(Span::raw(job));
+        // The card's title names the host, but not a cluster of another name
+        if let Some(cl) = sim.cluster().filter(|cl| Some(*cl) != sim.host.as_deref()) {
+            jobline.push(dim(" on "));
+            jobline.push(Span::raw(cl.to_string()));
+        }
         // The job named in the line, which may be the next one
         if let Some(j) = sim
             .shown_job()
