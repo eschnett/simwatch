@@ -1074,6 +1074,61 @@ time = [1, 2, 3, 4]
     }
 
     #[test]
+    fn clusters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = app(tmp.path(), None);
+        let on = |host: &str, name: &str, slurm: &str| {
+            let mut s = sim(
+                &tmp.path().join(name),
+                &format!("name = \"{name}\"\n[slurm]\n{slurm}"),
+            );
+            s.host = Some(host.into());
+            s
+        };
+        app.sims = vec![
+            on(
+                "symmetry",
+                "sym-run",
+                "job_id = 572393\nprevious_job_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]",
+            ),
+            on(
+                "trillium",
+                "tri-run",
+                "job_id = 12345678\nnext_job_id = 12345679\nprevious_job_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
+            ),
+        ];
+        // The hosts are the clusters
+        let list = render(&mut app);
+        assert!(list.contains("Cluster") && !list.contains("Host"), "{list}");
+        assert!(list.contains("trillium 12345679 next #12"), "{list}");
+        assert!(list.contains("symmetry 572393   #12"), "{list}");
+
+        // A status file names a cluster other than the host
+        app.sims.push(on(
+            "nibi-login",
+            "nibi-run",
+            "job_id = 7654321\ncluster = \"nibi\"",
+        ));
+        let list = render(&mut app);
+        assert!(
+            list.contains("Host") && list.contains("nibi-login"),
+            "{list}"
+        );
+        assert!(list.contains("nibi "), "{list}");
+
+        app.view = View::Cards;
+        let cards = render(&mut app);
+        assert!(cards.contains("job 7654321 on nibi"), "{cards}");
+        assert!(!cards.contains("on trillium"), "{cards}");
+
+        app.view = View::List;
+        app.selected = Some((Some("nibi-login".into()), tmp.path().join("nibi-run")));
+        app.set_view(View::List, true);
+        let detail = render(&mut app);
+        assert!(detail.contains("Cluster         nibi"), "{detail}");
+    }
+
+    #[test]
     fn slurm_times() {
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path(), None);

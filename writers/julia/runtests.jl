@@ -6,7 +6,8 @@ include(joinpath(@__DIR__, "SimWatchStatus.jl"))
 using .SimWatchStatus
 root = mktempdir()
 read_doc(dir) = TOML.parsefile(joinpath(dir, "simwatch.toml"))
-for v in ("SLURM_JOB_ID", "SLURM_PROCID", "SLURM_JOB_START_TIME", "SLURM_JOB_END_TIME",
+for v in ("SLURM_JOB_ID", "SLURM_CLUSTER_NAME", "SLURM_PROCID",
+          "SLURM_JOB_START_TIME", "SLURM_JOB_END_TIME",
           "SLURM_GPUS_ON_NODE", "CUDA_VISIBLE_DEVICES", "PMIX_RANK", "PMI_RANK", "OMPI_COMM_WORLD_RANK")
     delete!(ENV, v)
 end
@@ -70,12 +71,14 @@ end
 
 @testset "slurm environment and ranks" begin
     dir = joinpath(root, "slurm")
-    withenv("SLURM_JOB_ID" => "777", "SLURM_JOB_START_TIME" => "1790000000",
+    withenv("SLURM_JOB_ID" => "777", "SLURM_CLUSTER_NAME" => "trillium",
+            "SLURM_JOB_START_TIME" => "1790000000",
             "SLURM_JOB_END_TIME" => "1790086400", "CUDA_VISIBLE_DEVICES" => "0,1") do
         sw = SimWatchWriter(dir)
         simwatch_update!(sw; force=true)
         d = read_doc(dir)
         @test d["slurm"]["job_id"] == "777"
+        @test d["slurm"]["cluster"] == "trillium"
         @test d["started"] == "2026-09-21T14:13:20Z"
         @test d["progress"]["walltime_limit"] == 86400
         @test d["progress"]["walltime"] > 1e5

@@ -86,6 +86,7 @@ displayed generically instead of being rejected.
 | `job_id` | string or integer | `$SLURM_JOB_ID` of the job that wrote the file. SimWatch compares it with `squeue` to detect jobs that are queued, or that died without saying so. |
 | `job_name` | string | `$SLURM_JOB_NAME` |
 | `partition` | string | `$SLURM_JOB_PARTITION` |
+| `cluster` | string | `$SLURM_CLUSTER_NAME`. Without it, SimWatch takes the remote host's name as the cluster. |
 | `previous_job_ids` | array | Earlier jobs of this simulation, oldest first |
 | `next_job_id` | string or integer | A job submitted to continue this simulation, which has not written yet |
 
@@ -295,6 +296,7 @@ memory_bytes = 23.4e9
 [slurm]
 job_id = "1234567"
 partition = "amdq"
+cluster = "symmetry"
 previous_job_ids = ["1234001"]
 
 [[black_holes]]
@@ -355,7 +357,8 @@ of `src/` can still include it there, since it needs nothing else.
 4. **Fill in what is already known.** At least `name`, `status`, `updated`,
    `update_interval`. Then `[progress]` (`iteration`, `time`, `time_end`,
    `time_unit`, or `fraction`; `walltime`), `[slurm] job_id` from
-   `$SLURM_JOB_ID`, and `[resources]`. Add the diagnostics the code already
+   `$SLURM_JOB_ID` and `cluster` from `$SLURM_CLUSTER_NAME`, and
+   `[resources]`. Add the diagnostics the code already
    computes (e.g. `[[black_holes]]`, constraint norms in a `[constraints]`
    table, conserved totals). Convert them to plain numbers (`Float64`) and
    arrays. Omit keys whose values are unknown; never write placeholders such

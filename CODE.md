@@ -48,7 +48,7 @@ directories first, if there are any, then each host.
 | `src/images.rs` | Image size limits (`read_image_bytes`, `decode_image`), SVG rendering, and the image loader thread |
 | `src/recolor.rs` | `adapt`: make images opaque and flip them for a light or dark terminal (`image_theme`) |
 | `src/ui/mod.rs` | `App` state, key handling, header and status bar, the event loop `run` |
-| `src/ui/list.rs` | List view: the `Col` enum, `columns()` (which columns to show), `cell()` (one cell's text), shared with the cards and `--print` (`text()`) |
+| `src/ui/list.rs` | List view: the `Col` enum, `columns()` (which columns to show), `cell()` (one cell's text), shared with the cards and `--print` (`text()`); `draw()` computes all cells first, as the Host, Cluster and Job columns are as wide as their contents |
 | `src/ui/cards.rs` | Card view |
 | `src/ui/detail.rs` | Detail view: all keys on the left, the current image on the right |
 | `src/ui/help.rs` | Help overlay |

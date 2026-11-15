@@ -56,8 +56,9 @@ fn print_remote() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{out:?}");
     assert!(stdout.contains("far-away"), "{stdout}");
-    // A single host needs no Host column
+    // A single host needs no Host or Cluster column
     assert!(!stdout.contains("Host"), "{stdout}");
+    assert!(!stdout.contains("Cluster"), "{stdout}");
 
     let local = dir.join("local").display().to_string();
     let out = run(dir, &cfg, &[remote, local]);
@@ -66,10 +67,12 @@ fn print_remote() {
         stdout.contains("far-away") && stdout.contains("close-by"),
         "{stdout}"
     );
+    // The host is the cluster, as the status files do not name one
     assert!(
-        stdout.contains("Host") && stdout.contains("fakehost"),
+        stdout.contains("Cluster") && stdout.contains("fakehost"),
         "{stdout}"
     );
+    assert!(!stdout.contains("Host"), "{stdout}");
     assert!(stdout.contains("local"), "{stdout}");
 }
 

@@ -102,6 +102,16 @@ impl Sim {
         self.st().started.or_else(|| self.last_update())
     }
 
+    /// The cluster the simulation runs on: `slurm.cluster`, else the remote host
+    pub fn cluster(&self) -> Option<&str> {
+        self.st()
+            .slurm
+            .cluster
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+            .or(self.host.as_deref())
+    }
+
     pub fn job<'a>(&self, snap: Option<&'a slurm::Snapshot>) -> Option<&'a Job> {
         let id = self.st().slurm.job_id.as_deref()?;
         snap?.find(id)
@@ -506,6 +516,15 @@ x = 1.5
         let s = sim("[slurm]\nnext_job_id = 4");
         assert_eq!(s.shown_job(), Some(("4", 1, true)));
         assert_eq!(sim("").job_number(), None);
+
+        assert_eq!(sim("").cluster(), None);
+        let mut s = sim("[slurm]\ncluster = \"\"");
+        s.host = Some("nibi".into());
+        assert_eq!(s.cluster(), Some("nibi"));
+        let mut s = sim("[slurm]\ncluster = \"trillium\"");
+        assert_eq!(s.cluster(), Some("trillium"));
+        s.host = Some("tri".into());
+        assert_eq!(s.cluster(), Some("trillium"));
     }
 
     #[test]

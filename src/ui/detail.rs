@@ -337,6 +337,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
         if let Some(pt) = &s.partition {
             kv(&mut out, "Partition", pt.clone());
         }
+        if let Some(cl) = sim.cluster() {
+            kv(&mut out, "Cluster", cl.to_string());
+        }
         if let Some(n) = &s.next_job_id {
             let job = snap.and_then(|sn| sn.find(n));
             let state = match (snap, job) {

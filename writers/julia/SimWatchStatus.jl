@@ -79,7 +79,7 @@ optional, and `nothing` and `missing` are omitted:
   `["constraints.ham_l2"]`);
 - `progress`, `resources`, `slurm`: `NamedTuple`s or `Dict`s of the keys of
   those tables (`iteration`, `time`, `time_end`, `time_unit`, `fraction`,
-  `walltime`, …; `nodes`, `threads`, `gpus`, …; `job_id`,
+  `walltime`, …; `nodes`, `threads`, `gpus`, …; `job_id`, `cluster`,
   `previous_job_ids`, `next_job_id`, …);
 - `black_holes`, `images`: vectors of `NamedTuple`s or `Dict`s;
 - `history`: a `Dict` of equally long vectors, `"time"` and one per series;
@@ -276,6 +276,7 @@ function simwatch_update!(sw::SimWatchWriter; force::Bool=false,
         for (k, v) in (("job_id", get(ENV, "SLURM_JOB_ID", nothing)),
                        ("job_name", get(ENV, "SLURM_JOB_NAME", nothing)),
                        ("partition", get(ENV, "SLURM_JOB_PARTITION", nothing)),
+                       ("cluster", get(ENV, "SLURM_CLUSTER_NAME", nothing)),
                        ("previous_job_ids",
                         isempty(sw.previous_job_ids) ? nothing : sw.previous_job_ids))
             setkey!(sl, k, v)
