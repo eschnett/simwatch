@@ -67,7 +67,7 @@ simwatch /mnt/beegfs/$USER/runs ~/runs
 | `[` `]` | Previous / next image |
 | `Tab`, `1` `2` `3` | List, cards, detail view |
 | `s` | Change the sort order (newest, name, state, last update, group) |
-| `f` | Hide or show finished and failed simulations |
+| `f` | Hide or show finished, failed and cancelled simulations |
 | `/` | Filter by name, directory or group (`Enter` keeps the filter, `Esc` clears it) |
 | `r` | Re-read the status files now |
 | `R` | Scan the directories for new simulations now |
@@ -88,10 +88,11 @@ and which hosts are disconnected.
 | ▶ running | The status file is up to date |
 | ◷ queued | Waiting in the Slurm queue |
 | ? stale | The status file has not been updated for 3 × its `update_interval` |
-| ✗ lost | The Slurm job is gone, but the simulation did not report that it ended |
+| ✗ lost | The Slurm job is gone, but the simulation did not report that it ended, e.g. after a plain `scancel` |
 | ‖ stopped | Stopped on purpose, e.g. at a wall time limit, to be continued |
 | ✓ finished | Finished |
 | ✗ failed | The simulation reported a failure |
+| ⊘ cancelled | Cancelled on purpose, e.g. because it is no longer needed |
 | ! unreadable | The status file cannot be read |
 
 A `!` after the state in the list (e.g. `running!`) means that the latest
@@ -257,7 +258,10 @@ SimWatch is meant to run for days on a shared login node:
   drop-in Julia writer that depends only on the standard library.
 - [writers/simwatch.sh](writers/simwatch.sh): shell helpers to mark a job as
   queued right after `sbatch` (also for resubmissions, keeping the previous
-  job's diagnostics), or as failed when it exits with an error.
+  job's diagnostics), as failed when it exits with an error, and as
+  cancelled or failed when Slurm ends it. Cancel a simulation with
+  `simwatch_cancel DIR "why"` rather than `scancel`, which leaves it
+  *lost*; see [FORMAT.md](FORMAT.md#cancelling-a-simulation).
 
 ## Trying it out
 

@@ -40,7 +40,7 @@ displayed generically instead of being rejected.
 | Key | Type | Meaning |
 |---|---|---|
 | `name` | string | Simulation name. Without it SimWatch shows the directory name. |
-| `status` | string | `queued`, `starting`, `running`, `stopped`, `finished`, `failed` (see below) |
+| `status` | string | `queued`, `starting`, `running`, `stopped`, `finished`, `failed`, `cancelled` (see below) |
 | `updated` | time | When this file was written. Without it, the file's modification time is used. |
 | `started` | time | When the simulation (or the current job) started |
 | `update_interval` | number | Expected seconds until the next write |
@@ -210,6 +210,7 @@ with Slurm's view of the job:
 | `stopped` (also `checkpointed`, `requeued`, `paused`) | *stopped*: ended on purpose and will continue, e.g. at a wall time limit |
 | `finished` (also `done`, `completed`, `success`) | *finished* |
 | `failed` (also `error`, `crashed`, `aborted`, `killed`) | *failed*; put the reason into `message` |
+| `cancelled` (also `canceled`) | *cancelled*: ended on purpose because it is no longer needed |
 
 With a `next_job_id`, a `queued`, `stopped` or `failed` simulation is judged
 by that job instead: *queued* while it is pending, *running* once it runs,
@@ -243,6 +244,37 @@ next_job_id = "1234602"                     # submitted, has not written yet
 - **Changed parameters** are the simulation's own business: it writes its
   current parameters in its own tables, and can say in `message` what
   changed.
+
+## Cancelling a simulation
+
+A plain `scancel` ends the job before the simulation can write anything,
+so its file keeps saying `running` and SimWatch shows it as *lost*. Two
+helpers in [`writers/simwatch.sh`](writers/simwatch.sh) record the end
+instead:
+
+- **`simwatch_cancel DIR [MESSAGE]`** cancels a simulation on purpose: it
+  sets `status = "cancelled"` (with the message, e.g. `"superseded by
+  N=48"`), then runs `scancel` on the job the simulation waits for
+  (`next_job_id`) or runs as (`job_id`). It also marks a simulation whose
+  job is already gone, such as one SimWatch already shows as *lost*.
+- **`simwatch_terminated DIR`** is for a TERM trap in the batch script.
+  Slurm sends TERM when a job is cancelled, reaches its time limit or is
+  preempted. Unless the simulation has already reported its end (or
+  `simwatch_cancel` has), it sets `failed` at the time limit and
+  `cancelled` otherwise:
+
+  ```bash
+  . /path/to/simwatch/writers/simwatch.sh
+  rundir=$PWD/out/run1
+  trap 'simwatch_terminated "$rundir"; exit 143' TERM
+  srun julia --project run.jl out=$rundir
+  rc=$?
+  [ $rc -eq 0 ] || simwatch_mark "$rundir" failed "exit code $rc on $(hostname)"
+  exit $rc
+  ```
+
+  The `exit` in the trap matters: without it, the script would go on and
+  mark the run *failed* with the exit code.
 
 ## What is one simulation?
 
@@ -378,14 +410,22 @@ of `src/` can still include it there, since it needs nothing else.
    [One simulation, several jobs](#one-simulation-several-jobs)), and
    `simwatch_mark DIR failed "…"` when the job script sees a non-zero exit
    code.
-8. **Images (optional).** If the code already makes plots, save small PNG
+8. **Jobs that Slurm ends.** When Slurm cancels a job or kills it at its
+   time limit, the simulation cannot write its end, and SimWatch shows it
+   as *lost* for good. In each batch script, before the simulation starts,
+   set `trap 'simwatch_terminated "$rundir"; exit 143' TERM` (see
+   [Cancelling a simulation](#cancelling-a-simulation)). Cancel a
+   simulation that is no longer needed with `simwatch_cancel DIR "why"`,
+   not a plain `scancel`; tell the people (and agents) who run the code to
+   do the same.
+9. **Images (optional).** If the code already makes plots, save small PNG
    thumbnails (≤ 512×512) into the run directory. Without a plotting
    package, write SVG text by hand (lines, `<text>`, no external files)
    rather than adding a dependency. A plain white, black or transparent
    background works best; SimWatch adapts images to the user's terminal.
    Write them atomically, and list them under `[[images]]` with relative
    paths.
-9. **Check.** Run a short simulation and look at it with
+10. **Check.** Run a short simulation and look at it with
    `simwatch --print <dir>`; the run should appear with its name, state and
    progress.
 

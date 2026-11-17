@@ -394,6 +394,29 @@ fn write_static(root: &Path) {
     );
     write_status(&root.join("kerr-static"), &st);
 
+    // Cancelled with `simwatch_cancel` when a better run superseded it
+    let mut st = table(&[
+        ("name", s("kerr-static-n24")),
+        ("status", s("cancelled")),
+        ("updated", now_minus(3 * 86400)),
+        ("started", now_minus(4 * 86400)),
+        ("message", s("superseded by kerr-static")),
+    ]);
+    st.insert(
+        "progress".into(),
+        Value::Table(table(&[
+            ("iteration", i(30000)),
+            ("time", f(410.0)),
+            ("time_end", f(1000.0)),
+            ("time_unit", s("M")),
+        ])),
+    );
+    st.insert(
+        "slurm".into(),
+        Value::Table(table(&[("job_id", i(1233900))])),
+    );
+    write_status(&root.join("kerr-static-n24"), &st);
+
     let mut st = table(&[
         ("name", s("bbh-q4")),
         ("status", s("failed")),
