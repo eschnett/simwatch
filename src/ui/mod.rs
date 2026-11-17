@@ -429,7 +429,7 @@ impl App {
             KeyCode::Char('f') => {
                 self.hide_done = !self.hide_done;
                 self.notify(if self.hide_done {
-                    "hiding finished and failed simulations"
+                    "hiding finished, failed and cancelled simulations"
                 } else {
                     "showing all simulations"
                 });
@@ -814,7 +814,7 @@ pub fn health_style(h: Health) -> Style {
             Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)
         }
         Health::Stopped => Style::new().fg(Color::Magenta),
-        Health::Finished => Style::new().fg(Color::DarkGray),
+        Health::Finished | Health::Cancelled => Style::new().fg(Color::DarkGray),
         Health::Unknown => Style::new().fg(Color::Gray),
     }
 }

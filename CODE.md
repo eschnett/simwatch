@@ -114,6 +114,7 @@ Derived values:
    missing from a successful snapshot means *lost*. For a `queued`,
    `stopped` or `failed` simulation with a `next_job_id`, that job is
    checked instead of `job_id`: the simulation is waiting for it.
+   `finished` and `cancelled` are final: Slurm is not asked.
 
 The order of the `Health` enum variants is the sort order for "sort by
 state" (most urgent first). Keep that in mind when adding variants.

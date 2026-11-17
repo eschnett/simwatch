@@ -276,6 +276,7 @@ pub enum Health {
     Stopped,
     Unknown,
     Finished,
+    Cancelled,
 }
 
 impl Health {
@@ -290,6 +291,7 @@ impl Health {
             Health::Stopped => "stopped",
             Health::Unreadable => "unreadable",
             Health::Unknown => "unknown",
+            Health::Cancelled => "cancelled",
         }
     }
 
@@ -304,12 +306,13 @@ impl Health {
             Health::Stopped => "‖",
             Health::Unreadable => "!",
             Health::Unknown => "·",
+            Health::Cancelled => "⊘",
         }
     }
 
-    /// Finished or failed: nothing will happen any more
+    /// Finished, failed or cancelled: nothing will happen any more
     pub fn is_done(self) -> bool {
-        matches!(self, Health::Finished | Health::Failed)
+        matches!(self, Health::Finished | Health::Failed | Health::Cancelled)
     }
 }
 
@@ -346,7 +349,8 @@ pub fn health(
         Some("finished" | "done" | "completed" | "complete" | "success" | "succeeded") => {
             Health::Finished
         }
-        Some("failed" | "error" | "crashed" | "aborted" | "killed" | "cancelled") => Health::Failed,
+        Some("failed" | "error" | "crashed" | "aborted" | "killed") => Health::Failed,
+        Some("cancelled" | "canceled") => Health::Cancelled,
         Some("stopped" | "checkpointed" | "requeued" | "paused" | "suspended") => Health::Stopped,
         Some("queued" | "pending" | "submitted") => Health::Queued,
         _ => Health::Running,
@@ -379,7 +383,7 @@ pub fn health(
                 None => kind,
             }
         }
-        Health::Finished | Health::Failed | Health::Stopped => kind,
+        Health::Finished | Health::Failed | Health::Stopped | Health::Cancelled => kind,
         // "running", "starting", anything else, or no status at all
         _ => match job {
             Some(None) => Health::Lost,
@@ -441,6 +445,8 @@ mod tests {
         assert_eq!(h("status = \"Failed\"", None), Health::Failed);
         assert_eq!(h("status = \"stopped\"", None), Health::Stopped);
         assert_eq!(h("status = \"queued\"", None), Health::Queued);
+        assert_eq!(h("status = \"cancelled\"", None), Health::Cancelled);
+        assert_eq!(h("status = \"Canceled\"", None), Health::Cancelled);
     }
 
     #[test]
@@ -477,6 +483,9 @@ mod tests {
         assert_eq!(h(&s("stopped", "999"), Some(&snap)), Health::Lost);
         assert_eq!(h(&s("stopped", "101"), None), Health::Stopped);
         assert_eq!(h(&s("finished", "999"), Some(&snap)), Health::Finished);
+        // Cancelling ends the simulation, even with a job still in the queue
+        assert_eq!(h(&s("cancelled", "101"), Some(&snap)), Health::Cancelled);
+        assert_eq!(h(&s("cancelled", "999"), Some(&snap)), Health::Cancelled);
         // Without a next job, a stopped run is just stopped
         let stopped = "status = \"stopped\"\n[slurm]\njob_id = \"50\"";
         assert_eq!(h(stopped, Some(&snap)), Health::Stopped);

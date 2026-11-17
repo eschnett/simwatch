@@ -10,12 +10,18 @@
 #     simwatch_queued "$rundir" "$name" "$jobid"
 #
 # Batch script: record the outcome if the simulation itself could not, e.g.
-# because it crashed or was killed:
+# because it crashed, or Slurm ended the job (scancel, time limit):
 #
-#     julia --project run.jl
+#     trap 'simwatch_terminated "$rundir"; exit 143' TERM
+#     srun julia --project run.jl
 #     rc=$?
 #     [ $rc -eq 0 ] || simwatch_mark "$rundir" failed "exit code $rc on $(hostname)"
 #     exit $rc
+#
+# Cancelling a simulation that is no longer needed (instead of a plain
+# scancel, which leaves SimWatch to report it as lost):
+#
+#     simwatch_cancel "$rundir" "superseded by the run with N=48"
 
 # Escape a string for a TOML basic string
 _simwatch_quote() {
@@ -116,4 +122,71 @@ simwatch_mark() {
             { print }
         ' "$f"; fi
     } > "$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"
+}
+
+# The value of KEY in TABLE ("" for the top level) of FILE, without quotes
+_simwatch_get() {
+    [ -f "$1" ] || return 0
+    awk -v want="$2" -v key="$3" '
+        /^[[:space:]]*\[/ {
+            sec = $0
+            gsub(/^[[:space:]]*\[+[[:space:]]*|[[:space:]]*\]+.*$/, "", sec)
+            next
+        }
+        sec == want && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+            v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]]*(#.*)?$/, "", v)
+            gsub(/^"|"$/, "", v); print v; exit
+        }
+    ' "$1"
+}
+
+# The reported status of the simulation in DIR, in lower case
+_simwatch_status() {
+    _simwatch_get "$1/simwatch.toml" "" status | tr '[:upper:]' '[:lower:]'
+}
+
+# simwatch_cancel DIR [MESSAGE]
+# Cancel the simulation in DIR because it is no longer needed: mark it
+# `cancelled`, then scancel its job (the `next_job_id` it waits for, else
+# `job_id`). Marking first tells the job's `simwatch_terminated` trap that
+# the end was intended. Also marks a run whose job is already gone, such as
+# one that SimWatch shows as lost.
+simwatch_cancel() {
+    local dir=$1 message=${2-} f="$1/simwatch.toml" job=
+    if [ ! -f "$f" ]; then
+        echo "simwatch_cancel: no $f" >&2
+        return 1
+    fi
+    # As SimWatch decides which job a simulation waits for
+    case $(_simwatch_status "$dir") in
+        queued | pending | submitted | stopped | checkpointed | requeued | paused | suspended | \
+            failed | error | crashed | aborted | killed)
+            job=$(_simwatch_get "$f" slurm next_job_id) ;;
+    esac
+    [ -n "$job" ] || job=$(_simwatch_get "$f" slurm job_id)
+    simwatch_mark "$dir" cancelled "${message:-${job:+job $job cancelled}}"
+    [ -z "$job" ] || scancel "$job"
+}
+
+# simwatch_terminated DIR
+# For a TERM trap in a batch script (see the top of this file). Slurm sends
+# TERM when the job is cancelled, reaches its time limit or is preempted.
+# Unless the simulation already reported its end (or `simwatch_cancel`
+# did), mark it `failed` at the time limit and `cancelled` otherwise. A
+# preempted and requeued job reports `running` again once it restarts.
+simwatch_terminated() {
+    local dir=$1 end=${SLURM_JOB_END_TIME-} host
+    case $(_simwatch_status "$dir") in
+        finished | done | completed | complete | success | succeeded | \
+            failed | error | crashed | aborted | killed | cancelled | canceled | \
+            stopped | checkpointed | requeued | paused | suspended)
+            return 0 ;;
+    esac
+    host=$(hostname)
+    # SLURM_JOB_END_TIME (Slurm 22.05 and later) is when the time limit is reached
+    if [ -n "$end" ] && [ "$(date +%s)" -ge $((end - 60)) ]; then
+        simwatch_mark "$dir" failed "killed at the time limit (job ${SLURM_JOB_ID-?} on $host)"
+    else
+        simwatch_mark "$dir" cancelled "ended by Slurm: scancel or preemption (job ${SLURM_JOB_ID-?} on $host)"
+    fi
 }

@@ -17,7 +17,7 @@ const KEYS: &[(&str, &str)] = &[
     ("[ ]", "previous / next image"),
     ("Tab  1 2 3", "list, cards, detail view"),
     ("s", "change sort order"),
-    ("f", "hide / show finished and failed"),
+    ("f", "hide / show finished, failed and cancelled"),
     ("/", "filter by name (Enter keeps, Esc clears)"),
     ("r", "re-read status files now"),
     ("R", "scan for new simulations now"),
@@ -48,6 +48,7 @@ pub fn draw(f: &mut Frame, area: Rect) {
         (Health::Stopped, "stopped, e.g. at the wall time limit"),
         (Health::Finished, "finished"),
         (Health::Failed, "the simulation reported a failure"),
+        (Health::Cancelled, "cancelled on purpose"),
         (Health::Unreadable, "status file cannot be read"),
     ];
     for (h, d) in states {

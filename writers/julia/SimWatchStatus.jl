@@ -72,7 +72,7 @@ The contents of a `simwatch.toml`, ready for `TOML.print`. Every keyword is
 optional, and `nothing` and `missing` are omitted:
 
 - top level: `name`, `status` (`"starting"`, `"running"`, `"stopped"`,
-  `"finished"`, `"failed"`), `message` (its first line), `updated` and
+  `"finished"`, `"failed"`, `"cancelled"`), `message` (its first line), `updated` and
   `started` (`DateTime`s in UTC), `update_interval` (expected seconds until
   the next write), `code`, `host`, `pid`, `group` (simulations that belong
   together), `summary` (keys of the headline values, e.g.
