@@ -173,6 +173,19 @@ The Slurm worker calls `slurm::query` immediately, then every
 sooner than 15 s after the previous one. If `squeue` does not exist, it sends
 `SlurmDisabled` and exits.
 
+One host can serve several Slurms (a CPU and a GPU cluster on one file
+system). The worker asks `scontrol show config` once for the name of its
+own cluster, and after each `squeue` runs the command of every entry of
+`slurm_clusters`, which prints the `Reply` of `simwatch --squeue` from a
+login node of that cluster. The `Snapshot` holds the host's own jobs, its
+cluster name (`own`) and one `Snapshot` per other cluster (`others`).
+`Sim::snap` picks the one a status file's `slurm.cluster` names through
+`Snapshot::of`; it gives `None` for a cluster that was not asked, and the
+health is then the status file's own, never *lost*. While the own name is
+unknown (no `scontrol`, an older server), every file is compared with the
+host's own jobs, as before. A cluster's command that fails leaves that
+cluster out of the snapshot. Job ids of different clusters never meet.
+
 `slurm::run_with_timeout` reads stdout and stderr on helper threads, so a
 large output cannot block the child. It polls `try_wait` and kills the child
 at the timeout. `Snapshot::find` matches job ids exactly first, then by base

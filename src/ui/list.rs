@@ -297,7 +297,7 @@ pub fn text(
     table.extend(rows.iter().map(|(i, h)| {
         let sim = &sims[*i];
         cols.iter()
-            .map(|c| cell(*c, sim, *h, now, snaps.get(&sim.host)))
+            .map(|c| cell(*c, sim, *h, now, sim.snap(snaps.get(&sim.host))))
             .collect()
     }));
     align_jobs(&cols, &mut table[1..]);

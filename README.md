@@ -140,6 +140,8 @@ squeue_interval = 120      # seconds between squeue calls
 squeue_timeout = 20        # kill squeue after this many seconds
 slurm = true               # false: never call squeue
 squeue_program = "squeue"  # path to squeue, if not in PATH
+# [slurm_clusters.NAME]    # another Slurm this host can ask: see "Remote hosts"
+# command = ["ssh", "HOST", "simwatch", "--squeue"]
 
 stale_factor = 3           # stale after stale_factor × update_interval ...
 stale_floor = 180          # ... but never before this many seconds
@@ -191,7 +193,7 @@ A root `HOST:DIR` (a colon before any `/`, as for scp) is on a remote host.
   (see [Building](#building)). If it is not in the `PATH` of a
   non-interactive ssh session, set `remote_program`, e.g.
   `"~/.cargo/bin/simwatch"`. The remote host's own configuration file is
-  only used for `squeue_program` and `slurm = false`; everything else comes
+  only used for `squeue_program`, `slurm_clusters` and `slurm = false`; everything else comes
   from your local configuration.
 - **Passwords and MFA.** SimWatch connects to each host before the display
   starts, so ssh can ask for passwords or MFA codes as usual.
@@ -215,6 +217,24 @@ A root `HOST:DIR` (a colon before any `/`, as for scp) is on a remote host.
 
   The remote simwatch reads this file when it starts, so restart SimWatch
   afterwards; `c` reconnects only lost hosts.
+- **Several Slurms behind one host.** Some sites run separate Slurms that
+  share a file system, e.g. a CPU and a GPU cluster with their own login
+  nodes. A status file says which one its job belongs to in `slurm.cluster`
+  (`$SLURM_CLUSTER_NAME`). SimWatch asks the host's own Slurm for its name
+  (`scontrol show config`) and compares a job only with the `squeue` output
+  of its own cluster. A job of a cluster that the host cannot ask is shown
+  as its status file says, never as *lost*. To ask another cluster, name
+  it in the host's `~/.config/simwatch/config.toml` with a command that
+  runs `simwatch --squeue` on one of its login nodes:
+
+  ```toml
+  [slurm_clusters.grillium]     # the name in the status files
+  command = ["ssh", "-o", "BatchMode=yes", "trig-login01", ".cargo/bin/simwatch", "--squeue"]
+  ```
+
+  `simwatch --squeue` prints that host's jobs once, with its own
+  `squeue_program`. The command runs at every `squeue_interval` with the
+  same timeout; while it fails, that cluster's jobs are unknown.
 
 If you use ssh connection sharing, SimWatch reuses an existing login and
 needs no password at all, and its own connection serves your other ssh

@@ -29,6 +29,9 @@ fn main() -> Result<()> {
         return remote::serve::serve(std::io::stdin(), std::io::stdout().lock());
     }
     let cfg = Config::load(&cli)?;
+    if cli.squeue {
+        return print_squeue(&cfg);
+    }
     if cfg.print {
         return print_once(&cfg);
     }
@@ -79,6 +82,18 @@ fn sixel_picker(cfg: &Config) -> Picker {
     picker
 }
 
+/// This host's Slurm jobs, for a simwatch on a host of another cluster
+fn print_squeue(cfg: &Config) -> Result<()> {
+    let snap = slurm::query(&cfg.squeue_program, cfg.squeue_timeout)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let reply = slurm::Reply {
+        cluster: slurm::own_cluster(&cfg.squeue_program, cfg.squeue_timeout),
+        jobs: snap.jobs.into_values().collect(),
+    };
+    println!("{}", serde_json::to_string(&reply)?);
+    Ok(())
+}
+
 fn print_once(cfg: &Config) -> Result<()> {
     let monitor::Collected {
         sims,
@@ -92,7 +107,7 @@ fn print_once(cfg: &Config) -> Result<()> {
     let mut rows: Vec<(usize, model::Health)> = sims
         .iter()
         .enumerate()
-        .map(|(i, s)| (i, health(s, now, snaps.get(&s.host), &cfg.health)))
+        .map(|(i, s)| (i, health(s, now, s.snap(snaps.get(&s.host)), &cfg.health)))
         .collect();
     rows.sort_by(|a, b| {
         sims[b.0]

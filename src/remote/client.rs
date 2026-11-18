@@ -507,7 +507,17 @@ impl State {
                 Update::Sims(list)
             }
             FromServer::SlurmStarted => Update::SlurmStarted,
-            FromServer::Slurm { jobs } => Update::Slurm(Ok(Snapshot::new(Utc::now(), jobs))),
+            FromServer::Slurm {
+                jobs,
+                own,
+                clusters,
+            } => {
+                let now = Utc::now();
+                let others = clusters
+                    .into_iter()
+                    .map(|c| (c.name, Snapshot::new(now, c.jobs)));
+                Update::Slurm(Ok(Snapshot::new(now, jobs).with_clusters(own, others)))
+            }
             FromServer::SlurmError { error } => Update::Slurm(Err(error)),
             FromServer::SlurmDisabled { why } => Update::SlurmDisabled(why),
             FromServer::Warning { message } => Update::Warning(message),

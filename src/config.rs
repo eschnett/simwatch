@@ -52,6 +52,10 @@ pub struct Cli {
     /// Serve another simwatch over ssh (speaks a protocol on stdin/stdout)
     #[arg(long)]
     pub serve: bool,
+
+    /// Print this host's Slurm jobs for a simwatch on another host (see `slurm_clusters`)
+    #[arg(long)]
+    pub squeue: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -84,6 +88,7 @@ struct FileConfig {
     squeue_timeout: Option<f64>,
     squeue_program: Option<String>,
     slurm: Option<bool>,
+    slurm_clusters: Option<std::collections::BTreeMap<String, ClusterFile>>,
     stale_factor: Option<f64>,
     stale_floor: Option<f64>,
     default_update_interval: Option<f64>,
@@ -99,6 +104,14 @@ struct FileConfig {
     ssh: Option<Vec<String>>,
     remote_program: Option<String>,
     auto_reconnect: Option<bool>,
+}
+
+/// Another cluster whose Slurm this host can ask
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClusterFile {
+    /// Prints what `simwatch --squeue` prints
+    command: Vec<String>,
 }
 
 /// A remote host and the directories to watch there
@@ -121,6 +134,9 @@ pub struct Config {
     pub squeue_timeout: Duration,
     pub squeue_program: String,
     pub slurm: bool,
+    /// Other clusters whose Slurm this host can ask: the name that status
+    /// files give in `slurm.cluster`, and the command that lists its jobs
+    pub slurm_clusters: Vec<(String, Vec<String>)>,
     pub health: HealthParams,
     pub limits: Limits,
     pub images: ImageMode,
@@ -152,6 +168,7 @@ impl Default for Config {
             squeue_timeout: Duration::from_secs(20),
             squeue_program: "squeue".into(),
             slurm: true,
+            slurm_clusters: Vec::new(),
             health: HealthParams::default(),
             limits: Limits::default(),
             images: ImageMode::Sixel,
@@ -244,6 +261,12 @@ impl Config {
             squeue_timeout: f.squeue_timeout.map_or(d.squeue_timeout, secs),
             squeue_program: f.squeue_program.unwrap_or(d.squeue_program),
             slurm: !cli.no_slurm && f.slurm.unwrap_or(true),
+            slurm_clusters: f
+                .slurm_clusters
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, c)| (name, c.command))
+                .collect(),
             health: HealthParams {
                 stale_factor: f.stale_factor.unwrap_or(dh.stale_factor),
                 stale_floor: f.stale_floor.unwrap_or(dh.stale_floor),
