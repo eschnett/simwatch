@@ -105,6 +105,13 @@ pub enum ToServer {
     Unknown,
 }
 
+/// The jobs of another cluster that the server asked
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClusterJobs {
+    pub name: String,
+    pub jobs: Vec<Job>,
+}
+
 /// Messages from the server
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -133,6 +140,12 @@ pub enum FromServer {
     SlurmStarted,
     Slurm {
         jobs: Vec<Job>,
+        /// The name of the server's own cluster; an older server sends none
+        #[serde(default)]
+        own: Option<String>,
+        /// The jobs of the other clusters the server can ask
+        #[serde(default)]
+        clusters: Vec<ClusterJobs>,
     },
     SlurmError {
         error: String,
@@ -323,5 +336,18 @@ mod tests {
         assert!(!cfg.slurm && cfg.keep_text);
         assert!(cfg.roots[0].is_absolute() || dirs::home_dir().is_none());
         assert_eq!(cfg.roots[1], std::path::PathBuf::from("."));
+    }
+
+    #[test]
+    fn slurm_from_an_older_server() {
+        let m: FromServer = serde_json::from_str(r#"{"type":"slurm","jobs":[]}"#).unwrap();
+        assert_eq!(
+            m,
+            FromServer::Slurm {
+                jobs: Vec::new(),
+                own: None,
+                clusters: Vec::new(),
+            }
+        );
     }
 }

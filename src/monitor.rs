@@ -285,13 +285,24 @@ pub fn reread(sims: &mut [Sim], keep_text: bool) {
     }
 }
 
+/// This host's jobs and those of the other clusters it can ask
+fn query_slurm(cfg: &Config, own: &Option<String>) -> Result<Snapshot, QueryError> {
+    slurm::query_all(
+        &cfg.squeue_program,
+        own,
+        &cfg.slurm_clusters,
+        cfg.squeue_timeout,
+    )
+}
+
 fn slurm_worker(cfg: Config, rx: Receiver<()>, out: Out) {
+    let own = slurm::own_cluster(&cfg.squeue_program, cfg.squeue_timeout);
     loop {
         if !out.send(Update::SlurmStarted) {
             return;
         }
         let started = Instant::now();
-        let msg = match slurm::query(&cfg.squeue_program, cfg.squeue_timeout) {
+        let msg = match query_slurm(&cfg, &own) {
             Ok(snap) => Update::Slurm(Ok(snap)),
             Err(QueryError::NotFound) => {
                 out.send(Update::SlurmDisabled("squeue not found".into()));
@@ -369,7 +380,10 @@ pub fn collect_local(cfg: &Config) -> Once {
     reread(&mut sims, cfg.keep_text);
     let snap = cfg
         .slurm
-        .then(|| slurm::query(&cfg.squeue_program, cfg.squeue_timeout))
+        .then(|| {
+            let own = slurm::own_cluster(&cfg.squeue_program, cfg.squeue_timeout);
+            query_slurm(cfg, &own)
+        })
         .and_then(|r| match r {
             Err(QueryError::NotFound) => None,
             r => Some(r.map_err(|e| e.to_string())),

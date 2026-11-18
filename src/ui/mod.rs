@@ -256,13 +256,11 @@ impl App {
         }
     }
 
-    /// The Slurm snapshot of a simulation's host
+    /// The Slurm snapshot of a simulation: its host's, or that of the
+    /// cluster its status file names
     pub fn snap(&self, sim: &Sim) -> Option<&Snapshot> {
-        self.sources
-            .iter()
-            .find(|s| s.host == sim.host)?
-            .slurm
-            .as_ref()
+        let host = self.sources.iter().find(|s| s.host == sim.host)?;
+        sim.snap(host.slurm.as_ref())
     }
 
     pub fn health(&self, sim: &Sim) -> Health {

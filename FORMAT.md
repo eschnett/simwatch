@@ -86,7 +86,7 @@ displayed generically instead of being rejected.
 | `job_id` | string or integer | `$SLURM_JOB_ID` of the job that wrote the file. SimWatch compares it with `squeue` to detect jobs that are queued, or that died without saying so. |
 | `job_name` | string | `$SLURM_JOB_NAME` |
 | `partition` | string | `$SLURM_JOB_PARTITION` |
-| `cluster` | string | `$SLURM_CLUSTER_NAME`. Without it, SimWatch takes the remote host's name as the cluster. |
+| `cluster` | string | `$SLURM_CLUSTER_NAME`: which Slurm the job belongs to. SimWatch compares the job only with the `squeue` output of that cluster, so write it wherever one host serves several Slurms. Without it, the job belongs to the Slurm of the host that holds the file, and SimWatch shows the remote host's name as the cluster. |
 | `previous_job_ids` | array | Earlier jobs of this simulation, oldest first |
 | `next_job_id` | string or integer | A job submitted to continue this simulation, which has not written yet |
 

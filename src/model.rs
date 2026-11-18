@@ -112,6 +112,13 @@ impl Sim {
             .or(self.host.as_deref())
     }
 
+    /// The jobs of this simulation's Slurm, out of its host's snapshot: the
+    /// host's own, or those of the cluster that `slurm.cluster` names.
+    /// `None` if that Slurm was not asked.
+    pub fn snap<'a>(&self, host: Option<&'a slurm::Snapshot>) -> Option<&'a slurm::Snapshot> {
+        host?.of(self.st().slurm.cluster.as_deref())
+    }
+
     pub fn job<'a>(&self, snap: Option<&'a slurm::Snapshot>) -> Option<&'a Job> {
         let id = self.st().slurm.job_id.as_deref()?;
         snap?.find(id)
@@ -464,6 +471,32 @@ mod tests {
         assert_eq!(h(&s("100", "queued"), Some(&snap)), Health::Running);
         assert_eq!(h(&s("999", "queued"), Some(&snap)), Health::Lost);
         assert_eq!(h(&s("999", "finished"), Some(&snap)), Health::Finished);
+    }
+
+    #[test]
+    fn other_cluster() {
+        let host = snap().with_clusters(Some("trillium".into()), []);
+        let hs = |text: &str, host: &Snapshot| {
+            let s = sim(text);
+            health(&s, now(), s.snap(Some(host)), &HealthParams::default())
+        };
+        let s = |id: &str, cluster: &str| {
+            format!(
+                "status = \"queued\"\nupdated = 2026-10-02T15:59:00Z\n\
+                 [slurm]\njob_id = \"{id}\"\ncluster = \"{cluster}\""
+            )
+        };
+        // The host's own cluster, named or not
+        assert_eq!(hs(&s("101", "trillium"), &host), Health::Queued);
+        assert_eq!(hs(&s("999", "trillium"), &host), Health::Lost);
+        assert_eq!(hs(&s("999", ""), &host), Health::Lost);
+        // A cluster the host cannot ask: its jobs are not lost, they are unknown
+        assert_eq!(hs(&s("999", "grillium"), &host), Health::Queued);
+        // A cluster the host asked
+        let gpu = Snapshot::new(now(), parse_squeue("999|RUNNING|g|compute|1|0:10|1:00:00"));
+        let host = snap().with_clusters(Some("trillium".into()), [("grillium".to_string(), gpu)]);
+        assert_eq!(hs(&s("999", "grillium"), &host), Health::Running);
+        assert_eq!(hs(&s("101", "grillium"), &host), Health::Lost);
     }
 
     #[test]

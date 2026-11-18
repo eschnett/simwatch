@@ -160,6 +160,15 @@ impl Writer {
             Update::SlurmStarted => FromServer::SlurmStarted,
             Update::Slurm(Ok(snap)) => FromServer::Slurm {
                 jobs: snap.jobs.into_values().collect(),
+                own: snap.own,
+                clusters: snap
+                    .others
+                    .into_iter()
+                    .map(|(name, s)| super::ClusterJobs {
+                        name,
+                        jobs: s.jobs.into_values().collect(),
+                    })
+                    .collect(),
             },
             Update::Slurm(Err(error)) => FromServer::SlurmError { error },
             Update::SlurmDisabled(why) => FromServer::SlurmDisabled { why },

@@ -34,13 +34,27 @@ pub struct Job {
     pub dependency: String,
 }
 
-/// The result of one successful squeue call
+/// The result of one successful squeue call: the jobs of the host's own Slurm,
+/// and those of the other clusters that the host can ask
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub taken: DateTime<Utc>,
     pub jobs: HashMap<String, Job>,
     /// Base job id (without array index or het-job offset) to a full job id
     by_base: HashMap<String, String>,
+    /// The name of the host's own cluster, if Slurm said it
+    pub own: Option<String>,
+    /// The jobs of other clusters, by cluster name in lower case
+    pub others: HashMap<String, Snapshot>,
+}
+
+/// What `simwatch --squeue` prints: the jobs of one host's Slurm, for a
+/// simwatch on another host
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Reply {
+    pub cluster: Option<String>,
+    pub jobs: Vec<Job>,
 }
 
 impl Snapshot {
@@ -56,6 +70,40 @@ impl Snapshot {
             taken,
             jobs,
             by_base,
+            own: None,
+            others: HashMap::new(),
+        }
+    }
+
+    /// Add the name of the host's own cluster and the jobs of other clusters
+    pub fn with_clusters(
+        mut self,
+        own: Option<String>,
+        others: impl IntoIterator<Item = (String, Snapshot)>,
+    ) -> Self {
+        self.own = own.filter(|c| !c.trim().is_empty());
+        self.others = others
+            .into_iter()
+            .map(|(name, snap)| (name.trim().to_lowercase(), snap))
+            .collect();
+        self
+    }
+
+    /// The jobs of the Slurm that a status file's `slurm.cluster` names.
+    /// `None`: that Slurm was not asked, so nothing is known about its jobs.
+    /// A file that names no cluster belongs to the host's own Slurm, and so
+    /// does every file while the host's own cluster name is not known.
+    pub fn of(&self, cluster: Option<&str>) -> Option<&Snapshot> {
+        let name = cluster.map(|c| c.trim().to_lowercase());
+        let Some(name) = name.filter(|c| !c.is_empty()) else {
+            return Some(self);
+        };
+        if let Some(other) = self.others.get(&name) {
+            return Some(other);
+        }
+        match &self.own {
+            Some(own) if own.trim().to_lowercase() != name => None,
+            _ => Some(self),
         }
     }
 
@@ -70,7 +118,8 @@ impl Snapshot {
     }
 
     pub fn count(&self, state: &str) -> usize {
-        self.jobs.values().filter(|j| j.state == state).count()
+        let other: usize = self.others.values().map(|s| s.count(state)).sum();
+        self.jobs.values().filter(|j| j.state == state).count() + other
     }
 }
 
@@ -189,6 +238,55 @@ pub fn query(program: &str, timeout: Duration) -> Result<Snapshot, QueryError> {
     Ok(Snapshot::new(Utc::now(), parse_squeue(&out)))
 }
 
+/// The name of this host's cluster (`ClusterName` in `scontrol show config`),
+/// asked with the `scontrol` next to `squeue_program`. `None` if that fails.
+pub fn own_cluster(squeue_program: &str, timeout: Duration) -> Option<String> {
+    let scontrol = match std::path::Path::new(squeue_program).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.join("scontrol"),
+        _ => "scontrol".into(),
+    };
+    let mut cmd = Command::new(scontrol);
+    cmd.args(["show", "config"]);
+    parse_cluster_name(&run_with_timeout(cmd, timeout).ok()?)
+}
+
+fn parse_cluster_name(config: &str) -> Option<String> {
+    config.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "ClusterName" && !value.trim().is_empty()).then(|| value.trim().to_string())
+    })
+}
+
+/// Ask another cluster's Slurm with a command that prints what
+/// `simwatch --squeue` prints, e.g. `ssh HOST simwatch --squeue`
+pub fn query_other(command: &[String], timeout: Duration) -> Result<Snapshot, QueryError> {
+    let Some((program, args)) = command.split_first() else {
+        return Err(QueryError::Failed("no command".into()));
+    };
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    let out = run_with_timeout(cmd, timeout)?;
+    let reply: Reply = serde_json::from_str(out.trim())
+        .map_err(|e| QueryError::Failed(format!("not the output of simwatch --squeue: {e}")))?;
+    Ok(Snapshot::new(Utc::now(), reply.jobs))
+}
+
+/// The host's own jobs and those of the clusters it can ask. A cluster whose
+/// command fails is left out: nothing is then known about its jobs.
+pub fn query_all(
+    program: &str,
+    own: &Option<String>,
+    clusters: &[(String, Vec<String>)],
+    timeout: Duration,
+) -> Result<Snapshot, QueryError> {
+    let snap = query(program, timeout)?;
+    let others: Vec<(String, Snapshot)> = clusters
+        .iter()
+        .filter_map(|(name, command)| Some((name.clone(), query_other(command, timeout).ok()?)))
+        .collect();
+    Ok(snap.with_clusters(own.clone(), others))
+}
+
 fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<String, QueryError> {
     let mut child = cmd
         .stdin(Stdio::null())
@@ -305,6 +403,53 @@ garbage
         assert_eq!(snap.find("123459").unwrap().name, "scan2");
         assert!(snap.find("999").is_none());
         assert_eq!(snap.count("PENDING"), 2);
+    }
+
+    #[test]
+    fn clusters() {
+        let own = || Snapshot::new(Utc::now(), parse_squeue(OUT));
+        let gpu = Snapshot::new(
+            Utc::now(),
+            parse_squeue("77|PENDING|g|compute|1|0:00|1:00:00"),
+        );
+        // Without the host's own cluster name, every file belongs to its Slurm
+        let snap = own();
+        assert!(snap.of(None).unwrap().find("123456").is_some());
+        assert!(snap.of(Some("grillium")).unwrap().find("123456").is_some());
+        // With it, another cluster's jobs are unknown unless that cluster was asked
+        let snap = own().with_clusters(Some("trillium".into()), []);
+        assert!(snap.of(Some("")).unwrap().find("123456").is_some());
+        assert!(snap.of(Some("Trillium")).unwrap().find("123456").is_some());
+        assert!(snap.of(Some("grillium")).is_none());
+        let snap = own().with_clusters(Some("trillium".into()), [("Grillium".to_string(), gpu)]);
+        let other = snap.of(Some("grillium")).unwrap();
+        assert!(other.find("77").is_some() && other.find("123456").is_none());
+        assert!(snap.of(None).unwrap().find("77").is_none());
+        assert_eq!(snap.count("PENDING"), 3);
+    }
+
+    #[test]
+    fn cluster_name_and_reply() {
+        let config = "Configuration data as of 2026-11-18T10:00:00\nClusterName             = grillium\nCommitDelay = 0\n";
+        assert_eq!(parse_cluster_name(config).as_deref(), Some("grillium"));
+        assert_eq!(parse_cluster_name("ClusterName ="), None);
+        let reply = Reply {
+            cluster: Some("grillium".into()),
+            jobs: parse_squeue(OUT),
+        };
+        let text = serde_json::to_string(&reply).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&text).unwrap(), reply);
+        // The command of another cluster prints such a reply
+        let cmd = ["echo".to_string(), text];
+        let snap = query_other(&cmd, Duration::from_secs(5)).unwrap();
+        assert_eq!(snap.find("123457").unwrap().state, "PENDING");
+        assert!(
+            query_other(
+                &["echo".into(), "squeue: error".into()],
+                Duration::from_secs(5)
+            )
+            .is_err()
+        );
     }
 
     #[test]
