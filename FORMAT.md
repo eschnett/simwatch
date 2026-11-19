@@ -49,6 +49,7 @@ displayed generically instead of being rejected.
 | `host` | string | Host name, e.g. of the first compute node |
 | `pid` | integer | Process id |
 | `group` | string | Simulations with the same group belong together, e.g. the rows of a parameter study. SimWatch can sort and filter by it. |
+| `description` | string | What the simulation is for, in a line or two, e.g. `"S1 sweep over the separation"`. Unlike `message` it does not change; the detail view shows it as *About*. |
 | `summary` | array | The headline values, by key; see [Summary](#summary) |
 
 ### `[progress]`
