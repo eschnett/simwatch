@@ -47,6 +47,8 @@ pub struct Status {
     pub pid: Option<i64>,
     /// Simulations with the same group belong together, e.g. a parameter study
     pub group: Option<String>,
+    /// What the simulation is for, in a line or two; unlike `message`, it does not change
+    pub description: Option<String>,
     /// Keys (as in `values`) of the headline values
     pub summary: Vec<SummaryKey>,
     pub progress: Progress,
@@ -189,6 +191,7 @@ fn status_from_table(t: &mut Table) -> Status {
     flatten("", &Value::Table(t.clone()), &mut values);
     let mut st = Status {
         group: take_string(t, "group"),
+        description: take_string(t, "description"),
         summary,
         history,
         values,
@@ -602,6 +605,7 @@ coeffs = [1, 2, 3]
         let st = parse_status(
             r#"
 group = "octant-study"
+description = "octant symmetry, 3 resolutions"
 summary = ["shells.r2.ham_l2", { key = "progress.iteration", label = "it" }]
 
 [progress]
@@ -627,6 +631,10 @@ ham_l2 = [1e-6, 2e-6, 4e-6]
         )
         .unwrap();
         assert_eq!(st.group.as_deref(), Some("octant-study"));
+        assert_eq!(
+            st.description.as_deref(),
+            Some("octant symmetry, 3 resolutions")
+        );
         assert_eq!(st.summary.len(), 2);
         assert_eq!(st.summary[0].key, "shells.r2.ham_l2");
         assert_eq!(st.summary[1].label.as_deref(), Some("it"));
@@ -655,6 +663,7 @@ ham_l2 = [1e-6, 2e-6, 4e-6]
         assert!(keys.contains(&"history.note"));
         assert!(keys.contains(&"history.words"));
         assert!(!keys.contains(&"group"));
+        assert!(!keys.contains(&"description"));
     }
 
     #[test]

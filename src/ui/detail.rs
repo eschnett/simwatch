@@ -171,6 +171,9 @@ pub fn lines(sim: &Sim, snap: Option<&Snapshot>, h: crate::model::Health) -> Vec
     if let Some(m) = &st.message {
         kv(&mut out, "Message", m.clone());
     }
+    if let Some(d) = &st.description {
+        kv(&mut out, "About", d.clone());
+    }
     if let Some(g) = &st.group {
         kv(&mut out, "Group", g.clone());
     }
