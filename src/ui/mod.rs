@@ -118,6 +118,8 @@ pub struct Source {
     pub scan_dirs: usize,
     /// Why a remote host is not connected
     pub disconnected: Option<String>,
+    /// An attempt to connect to a remote host is under way
+    pub connecting: bool,
     /// The latest problem a remote host reported
     pub warning: Option<String>,
 }
@@ -244,8 +246,13 @@ impl App {
                 src.squeue.busy = None;
                 src.slurm_disabled = Some(why);
             }
-            Update::Connected => src.disconnected = None,
+            Update::Connecting => src.connecting = true,
+            Update::Connected => {
+                src.connecting = false;
+                src.disconnected = None;
+            }
             Update::Disconnected(why) => {
+                src.connecting = false;
                 // Nothing is running on the other side any more
                 src.scan.busy = None;
                 src.read.busy = None;
@@ -650,6 +657,15 @@ impl App {
             if named {
                 spans.push(Span::raw(format!("{}: ", src.name())).bold());
             }
+            if src.connecting {
+                // A first attempt, or one in the background after a lost connection
+                let text = match &src.disconnected {
+                    Some(why) => format!("disconnected ({}), connecting…", fmt::trunc(why, 40)),
+                    None => "connecting…".to_string(),
+                };
+                spans.push(Span::styled(text, Style::new().fg(Color::Yellow)));
+                continue;
+            }
             if let Some(why) = &src.disconnected {
                 spans.push(Span::styled(
                     format!("disconnected ({}), c reconnects", fmt::trunc(why, 40)),
@@ -1013,6 +1029,35 @@ title = "Tracks"
 
         app.help = true;
         assert!(render(&mut app).contains("scan for new simulations now"));
+    }
+
+    #[test]
+    fn connecting_in_the_background() {
+        let cfg = Config {
+            roots: Vec::new(),
+            remotes: vec![crate::config::Remote {
+                host: "fir".into(),
+                roots: vec!["/scratch/x".into()],
+            }],
+            ..Config::default()
+        };
+        let mut app = App::new(cfg, None, Box::new(|_, _, _| Err("no".into())));
+        app.apply((0, Update::Connecting));
+        assert!(render(&mut app).contains("fir: connecting…"));
+        app.apply((0, Update::Disconnected("needs a login".into())));
+        let screen = render(&mut app);
+        assert!(
+            screen.contains("disconnected (needs a login), c reconnects"),
+            "{screen}"
+        );
+        app.apply((0, Update::Connecting));
+        assert!(render(&mut app).contains("disconnected (needs a login), connecting…"));
+        app.apply((0, Update::Connected));
+        let screen = render(&mut app);
+        assert!(
+            !screen.contains("connecting") && !screen.contains("disconnected"),
+            "{screen}"
+        );
     }
 
     #[test]

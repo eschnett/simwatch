@@ -43,6 +43,8 @@ pub enum Update {
     SlurmStarted,
     Slurm(Result<Snapshot, String>),
     SlurmDisabled(String),
+    /// An attempt to connect to a remote host has started
+    Connecting,
     /// A remote host is connected (again)
     Connected,
     /// The connection to a remote host was lost, or could not be made
@@ -84,9 +86,8 @@ struct Local {
 }
 
 impl Monitor {
-    /// Start the local workers, and connect to each remote host in turn.
-    /// Connecting may ask for passwords on the terminal, so this must run
-    /// before the TUI takes over the terminal.
+    /// Start the local workers, and connect to the remote hosts in the
+    /// background
     pub fn start(cfg: &Config, tx: Sender<Tagged>) -> Monitor {
         let mut local = None;
         let mut remotes = Vec::new();
@@ -116,18 +117,13 @@ impl Monitor {
         }
     }
 
-    /// Whether every source failed to start (all hosts unreachable)
-    pub fn all_failed(&self) -> bool {
-        self.local.is_none() && self.remotes.iter().all(|c| !c.is_connected())
-    }
-
-    /// Whether some remote host is not connected
+    /// Whether some remote host is neither connected nor trying to connect
     pub fn any_disconnected(&self) -> bool {
-        self.remotes.iter().any(|c| !c.is_connected())
+        self.remotes.iter().any(|c| c.is_disconnected())
     }
 
-    /// Reconnect lost hosts one after another, asking for passwords on the
-    /// terminal. The TUI must have released the terminal.
+    /// Connect the disconnected hosts one after another, asking for
+    /// passwords on the terminal. The TUI must have released the terminal.
     pub fn reconnect(&self) {
         for c in &self.remotes {
             c.reconnect();

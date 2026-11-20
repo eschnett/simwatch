@@ -44,12 +44,10 @@ fn main() -> Result<()> {
         ImageMode::Sixel => Some(sixel_picker(&cfg)),
     };
 
-    // Connecting to remote hosts may ask for passwords, before the TUI starts
+    // Remote hosts connect in the background; one that needs a login is
+    // connected from the TUI, with the `c` key
     let (tx, rx) = channel();
     let monitor = monitor::Monitor::start(&cfg, tx);
-    if monitor.all_failed() {
-        bail!("could not connect to any host");
-    }
     let app = ui::App::new(cfg, picker, monitor.image_fetch());
     let mut terminal = ratatui::init();
     remote::client::TUI_ACTIVE.store(true, Ordering::Relaxed);

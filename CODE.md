@@ -205,7 +205,12 @@ right wherever they are shown. `N/A` (no start estimate) becomes `None`.
 ServerAliveInterval=30 -o ServerAliveCountMax=4 HOST '<remote_program>
 --serve'` with piped stdin, stdout and stderr. ssh asks for passwords on
 `/dev/tty`, so prompts work although its stdio are pipes. The first
-connection is made in `Monitor::start`, before the TUI starts, one host
+connection is made on the host's control thread, with `BatchMode=yes`, so
+that the TUI starts at once and a slow host (Fir, 2026-11-20) holds up
+neither the TUI nor the other hosts. `Connecting`
+updates show the attempt; a failure that only a prompt could have avoided
+(`needs_login`) becomes "needs a login", for the `c` key. Formerly the first
+connection was interactive, in `Monitor::start` before the TUI, one host
 after another. `TUI_ACTIVE` says whether the TUI owns the terminal: while it
 does not, ssh's stderr is passed through; otherwise only its last line is
 kept, as the reason for a failure.

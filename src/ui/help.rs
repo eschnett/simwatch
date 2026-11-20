@@ -21,7 +21,7 @@ const KEYS: &[(&str, &str)] = &[
     ("/", "filter by name (Enter keeps, Esc clears)"),
     ("r", "re-read status files now"),
     ("R", "scan for new simulations now"),
-    ("c", "reconnect to lost remote hosts"),
+    ("c", "connect to disconnected hosts, asking for passwords"),
     ("Ctrl-L", "repaint the screen"),
     ("q", "quit"),
 ];

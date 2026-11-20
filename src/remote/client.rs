@@ -1,9 +1,11 @@
 //! The local side of a remote host: one ssh connection, kept open.
 //!
-//! The first connection is made before the TUI starts, so that ssh can ask
-//! for passwords or MFA codes on the terminal (it uses `/dev/tty`, not the
-//! piped stdin). A lost connection is retried only without prompting
-//! (`BatchMode`), or interactively when the user asks for it.
+//! Every connection is made in the background without prompting
+//! (`BatchMode`), so that a slow or unreachable host never holds up the TUI
+//! or the other hosts. A host that needs a password or an MFA code is
+//! connected interactively when the user asks for it: ssh then asks on
+//! `/dev/tty`, not on the piped stdin, while the TUI has released the
+//! terminal.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
@@ -62,14 +64,17 @@ pub struct Client {
     pub host: String,
     cmd: Sender<Cmd>,
     connected: Arc<AtomicBool>,
+    /// An attempt to connect is under way
+    connecting: Arc<AtomicBool>,
 }
 
 impl Client {
-    /// Connect (interactively, which may ask for a password), then keep the
-    /// connection on a background thread
+    /// Connect and keep the connection, on a background thread, without
+    /// prompting
     pub fn start(cfg: &Config, remote: &Remote, out: Out) -> Client {
         let (tx, rx) = channel();
         let connected = Arc::new(AtomicBool::new(false));
+        let connecting = Arc::new(AtomicBool::new(true));
         let mut ctl = Control {
             cfg: cfg.clone(),
             remote: remote.clone(),
@@ -78,19 +83,23 @@ impl Client {
             conn: None,
             generation: 0,
             connected: connected.clone(),
+            connecting: connecting.clone(),
             pending: Pending::default(),
             retry: None,
             backoff: RETRY_FIRST,
         };
-        ctl.connect(true);
         thread::Builder::new()
             .name(format!("simwatch-{}", remote.host))
-            .spawn(move || ctl.run(rx))
+            .spawn(move || {
+                ctl.connect(false);
+                ctl.run(rx)
+            })
             .expect("spawning client thread");
         Client {
             host: remote.host.clone(),
             cmd: tx,
             connected,
+            connecting,
         }
     }
 
@@ -102,10 +111,15 @@ impl Client {
         self.connected.load(Ordering::Relaxed)
     }
 
-    /// Connect again interactively if the connection was lost, and wait for
-    /// the result
+    /// Neither connected nor trying to connect
+    pub fn is_disconnected(&self) -> bool {
+        !self.is_connected() && !self.connecting.load(Ordering::Relaxed)
+    }
+
+    /// Connect interactively if not connected and not trying already, and
+    /// wait for the result
     pub fn reconnect(&self) {
-        if self.is_connected() {
+        if !self.is_disconnected() {
             return;
         }
         let (tx, rx) = channel();
@@ -162,6 +176,7 @@ struct Control {
     /// Numbers the connections, so that old ones are ignored
     generation: u64,
     connected: Arc<AtomicBool>,
+    connecting: Arc<AtomicBool>,
     pending: Pending,
     /// When to try again without prompting
     retry: Option<Instant>,
@@ -251,7 +266,11 @@ impl Control {
         if interactive && !TUI_ACTIVE.load(Ordering::Relaxed) {
             eprintln!("simwatch: connecting to {host} …");
         }
-        match self.open(interactive) {
+        self.connecting.store(true, Ordering::Relaxed);
+        self.out.send(Update::Connecting);
+        let res = self.open(interactive);
+        self.connecting.store(false, Ordering::Relaxed);
+        match res {
             Ok(conn) => {
                 self.conn = Some(conn);
                 self.connected.store(true, Ordering::Relaxed);
@@ -263,6 +282,11 @@ impl Control {
                 if interactive && !TUI_ACTIVE.load(Ordering::Relaxed) {
                     eprintln!("simwatch: {host}: {e}");
                 }
+                let e = if !interactive && needs_login(&e) {
+                    "needs a login".to_string()
+                } else {
+                    e
+                };
                 self.out.send(Update::Disconnected(e));
                 self.schedule_retry();
             }
@@ -353,6 +377,18 @@ impl Control {
             }
         }
     }
+}
+
+/// Whether ssh failed because it would have had to ask: for a password, an
+/// MFA code, or about an unknown host key
+fn needs_login(why: &str) -> bool {
+    [
+        "Permission denied",
+        "Host key verification failed",
+        "passphrase",
+    ]
+    .iter()
+    .any(|s| why.contains(s))
 }
 
 /// `ssh [options] HOST 'simwatch --serve'`
@@ -576,5 +612,22 @@ fn once(mut r: impl BufRead, host: &str) -> Result<Once, MagicError> {
             Some(Update::Warning(w)) => scan.warnings.push(w),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_failures() {
+        assert!(needs_login(
+            "eschnett@fir.alliancecan.ca: Permission denied (publickey,keyboard-interactive)."
+        ));
+        assert!(needs_login("Host key verification failed."));
+        assert!(!needs_login(
+            "ssh: connect to host fir port 22: Operation timed out"
+        ));
+        assert!(!needs_login("timed out"));
     }
 }

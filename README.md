@@ -71,7 +71,7 @@ simwatch /mnt/beegfs/$USER/runs ~/runs
 | `/` | Filter by name, directory or group (`Enter` keeps the filter, `Esc` clears it) |
 | `r` | Re-read the status files now |
 | `R` | Scan the directories for new simulations now |
-| `c` | Reconnect to remote hosts whose connection was lost |
+| `c` | Connect to remote hosts that are disconnected or need a login, asking for passwords |
 | `Ctrl-L` | Repaint the screen |
 | `?` | Help |
 | `q` | Quit |
@@ -200,8 +200,16 @@ A root `HOST:DIR` (a colon before any `/`, as for scp) is on a remote host.
   `"~/.cargo/bin/simwatch"`. The remote host's own configuration file is
   only used for `squeue_program`, `slurm_clusters` and `slurm = false`; everything else comes
   from your local configuration.
-- **Passwords and MFA.** SimWatch connects to each host before the display
-  starts, so ssh can ask for passwords or MFA codes as usual.
+- **Connecting.** The display starts at once, and every host connects in
+  the background, each on its own: the status bar shows `connecting…`
+  until it answers, and a slow or unreachable host holds up nothing else.
+  A background attempt never prompts (ssh's `BatchMode`) and gives up
+  after a minute.
+- **Passwords and MFA.** A host that needs a password, an MFA code or a
+  new host key shows as `disconnected (needs a login)`. Press `c`:
+  SimWatch gives the terminal back to ssh, which asks as usual, then
+  returns to the display. With ssh connection sharing (below), a host
+  whose login is still open connects without asking.
 - **Lost connections.** ssh notices a dead connection within about two
   minutes. The host's simulations stay in the list (and turn *stale*), and
   the status bar shows the host as disconnected. With `auto_reconnect`,

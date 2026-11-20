@@ -173,7 +173,7 @@ impl Writer {
             Update::Slurm(Err(error)) => FromServer::SlurmError { error },
             Update::SlurmDisabled(why) => FromServer::SlurmDisabled { why },
             Update::Warning(message) => FromServer::Warning { message },
-            Update::Connected | Update::Disconnected(_) => return Ok(()),
+            Update::Connecting | Update::Connected | Update::Disconnected(_) => return Ok(()),
         };
         write_msg(out, &msg)
     }
