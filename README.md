@@ -114,7 +114,10 @@ wide as their contents need, and the job states line up.
   values when some simulation names them in `summary`; an arrow (↑ ↓ →)
   shows their trend when the simulation records a `[history]`. On narrow
   terminals the less important columns (resources, wall time, speed, …)
-  are left out.
+  are left out. The Name column is as wide as the longest name, so that
+  the numbers follow it closely; the Summary column takes what is left.
+  Every other row has a faint green background (`stripe_color`), to follow
+  a row across a wide window.
 - **Cards:** a few lines per simulation, with the summary values and their
   recent history as sparklines. A queued job shows when Slurm expects it to
   start (`starts ~14:34 (in 78m)`).
@@ -155,6 +158,8 @@ skip_dirs = [".git", "target", "node_modules", "__pycache__"]  # names; * and ? 
 
 images = "sixel"           # or "none"
 image_theme = "as-is"      # "light" or "dark": adapt images to the terminal
+# stripe_color = "#f1f9ee" # every other row of the list; "none" for no stripes. Without it,
+                           # a faint green for image_theme "light" or "dark", none for "as-is"
 # font_size = [9, 18]      # terminal cell size in pixels, if not detected
 
 ssh = ["ssh"]              # ssh command and options, e.g. ["ssh", "-C"]

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 
@@ -244,6 +244,29 @@ pub fn cell(col: Col, sim: &Sim, h: Health, now: DateTime<Utc>, snap: Option<&Sn
     }
 }
 
+/// The widths of the columns `cols`, whose widest cells are `content`: the
+/// name as wide as the longest, so that the numbers follow it closely, and
+/// what is left to Summary, the last column, or empty at the right
+fn widths(cols: &[Col], content: &[usize], total: u16) -> Vec<Constraint> {
+    let others: u16 = cols
+        .iter()
+        .zip(content)
+        .filter(|(c, _)| **c != Col::Name)
+        .map(|(c, n)| c.min_width(*n) + 1)
+        .sum();
+    let room = total.saturating_sub(others + 1).max(Col::Name.min_width(0));
+    cols.iter()
+        .zip(content)
+        .map(|(c, n)| match c {
+            Col::Name => {
+                let n = (*n).max(c.header().len()).min(room as usize);
+                Constraint::Length(n as u16)
+            }
+            _ => c.width(*n),
+        })
+        .collect()
+}
+
 /// Pads the job ids in the Job column of `rows` to one width, so that the job
 /// states after them line up
 fn align_jobs(cols: &[Col], rows: &mut [Vec<String>]) {
@@ -389,12 +412,18 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
         }
         keep.retain(|&j| all[j] != drop);
     }
+    // A faint background on every other row, to follow a row across a wide window
+    let stripe = app
+        .cfg
+        .stripes
+        .map(|[r, g, b]| Style::new().bg(Color::Rgb(r, g, b)));
     let rows: Vec<Row> = vis
         .iter()
         .zip(texts)
-        .map(|((_, h), mut text)| {
+        .enumerate()
+        .map(|(k, ((_, h), mut text))| {
             let hs = health_style(*h);
-            Row::new(keep.iter().map(|&j| {
+            let row = Row::new(keep.iter().map(|&j| {
                 let cell = Cell::from(std::mem::take(&mut text[j]));
                 match all[j] {
                     Col::Glyph | Col::State => cell.style(hs),
@@ -402,17 +431,28 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
                     Col::Host | Col::Group | Col::Cluster => cell.dim(),
                     _ => cell,
                 }
-            }))
+            }));
+            match stripe {
+                Some(st) if k % 2 == 1 => row.style(st),
+                _ => row,
+            }
         })
         .collect();
     let cols: Vec<Col> = keep.iter().map(|&j| all[j]).collect();
-    let table = Table::new(rows, keep.iter().map(|&j| all[j].width(content[j])))
-        .header(
-            Row::new(cols.iter().map(|c| c.header()))
-                .style(Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
-        )
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-        .column_spacing(1);
+    let table = Table::new(
+        rows,
+        widths(
+            &cols,
+            &keep.iter().map(|&j| content[j]).collect::<Vec<_>>(),
+            area.width,
+        ),
+    )
+    .header(
+        Row::new(cols.iter().map(|c| c.header()))
+            .style(Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
+    )
+    .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+    .column_spacing(1);
     let pos = app.selected_pos(&vis);
     app.table_state.select(pos);
     f.render_stateful_widget(table, area, &mut app.table_state);
@@ -421,6 +461,19 @@ pub fn draw(app: &mut App, f: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn name_fits_its_content() {
+        let cols = [Col::Glyph, Col::Name, Col::State, Col::Iter, Col::Summary];
+        let w = widths(&cols, &[1, 10, 7, 3, 30], 200);
+        assert_eq!(w[1], Constraint::Length(10));
+        assert_eq!(w[4], Constraint::Fill(1));
+        // too narrow for the whole name: what is left, but at least as much as before
+        let w = widths(&cols, &[1, 100, 7, 3, 30], 80);
+        assert_eq!(w[1], Constraint::Length(80 - (2 + 12 + 9 + 25) - 1));
+        let w = widths(&cols, &[1, 100, 7, 3, 30], 40);
+        assert_eq!(w[1], Constraint::Length(16));
+    }
 
     #[test]
     fn job_states_line_up() {

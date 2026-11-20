@@ -77,6 +77,41 @@ pub enum ImageTheme {
     AsIs,
 }
 
+/// The background of every other row of the list: `"#rrggbb"`, or `"none"`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stripes(pub Option<[u8; 3]>);
+
+impl Stripes {
+    pub fn parse(s: &str) -> Option<Stripes> {
+        if s == "none" {
+            return Some(Stripes(None));
+        }
+        let h = s
+            .strip_prefix('#')
+            .filter(|h| h.len() == 6 && h.is_ascii())?;
+        let c = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+        Some(Stripes(Some([c(0)?, c(2)?, c(4)?])))
+    }
+
+    /// A faint green on a light or a dark background; none if the background is not known
+    pub fn for_theme(theme: ImageTheme) -> Stripes {
+        Stripes(match theme {
+            ImageTheme::Light => Some([0xf1, 0xf9, 0xee]),
+            ImageTheme::Dark => Some([0x1d, 0x30, 0x1d]),
+            ImageTheme::AsIs => None,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Stripes {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Stripes::parse(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!("expected \"#rrggbb\" or \"none\", not {s:?}"))
+        })
+    }
+}
+
 /// The contents of the configuration file; every setting is optional
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -99,6 +134,7 @@ struct FileConfig {
     skip_dirs: Option<Vec<String>>,
     images: Option<ImageMode>,
     image_theme: Option<ImageTheme>,
+    stripe_color: Option<Stripes>,
     /// Terminal cell size in pixels, overriding detection
     font_size: Option<[u16; 2]>,
     ssh: Option<Vec<String>>,
@@ -141,6 +177,8 @@ pub struct Config {
     pub limits: Limits,
     pub images: ImageMode,
     pub image_theme: ImageTheme,
+    /// The background of every other row of the list, if any
+    pub stripes: Option<[u8; 3]>,
     /// Terminal cell size in pixels; detected if not set
     pub font_size: Option<[u16; 2]>,
     /// The ssh command and its options
@@ -173,6 +211,7 @@ impl Default for Config {
             limits: Limits::default(),
             images: ImageMode::Sixel,
             image_theme: ImageTheme::AsIs,
+            stripes: None,
             font_size: None,
             ssh: vec!["ssh".into()],
             remote_program: "simwatch".into(),
@@ -246,6 +285,7 @@ impl Config {
         }
         let dl = Limits::default();
         let dh = HealthParams::default();
+        let image_theme = cli.image_theme.or(f.image_theme).unwrap_or(d.image_theme);
         Config {
             roots,
             remotes,
@@ -282,7 +322,9 @@ impl Config {
                 skip_dirs: f.skip_dirs.unwrap_or(dl.skip_dirs),
             },
             images: cli.images.or(f.images).unwrap_or(d.images),
-            image_theme: cli.image_theme.or(f.image_theme).unwrap_or(d.image_theme),
+            image_theme,
+            // without a colour of its own, the image theme says which background the stripes are on
+            stripes: f.stripe_color.unwrap_or(Stripes::for_theme(image_theme)).0,
             font_size: f.font_size.or(d.font_size),
             ssh: f.ssh.filter(|s| !s.is_empty()).unwrap_or(d.ssh),
             remote_program: f.remote_program.unwrap_or(d.remote_program),
@@ -352,6 +394,32 @@ image_theme = "as-is"
         assert_eq!(c.refresh_interval, Duration::from_secs(60));
         assert!(c.remotes.is_empty());
         assert_eq!(c.sources(), [None]);
+    }
+
+    #[test]
+    fn stripes() {
+        let cli = Cli::parse_from(["simwatch"]);
+        let c = Config::merge(&cli, FileConfig::default());
+        assert_eq!(c.stripes, None); // the background is not known
+        let file = |text: &str| toml::from_str::<FileConfig>(text);
+        let c = Config::merge(&cli, file(r#"image_theme = "light""#).unwrap());
+        assert_eq!(c.stripes, Stripes::for_theme(ImageTheme::Light).0);
+        let c = Config::merge(
+            &cli,
+            file("image_theme = \"dark\"\nstripe_color = \"#102030\"").unwrap(),
+        );
+        assert_eq!(c.stripes, Some([0x10, 0x20, 0x30]));
+        let c = Config::merge(
+            &cli,
+            file("image_theme = \"dark\"\nstripe_color = \"none\"").unwrap(),
+        );
+        assert_eq!(c.stripes, None);
+        for bad in ["green", "#12345", "#12345g", "#1234é"] {
+            let err = file(&format!("stripe_color = {bad:?}"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("#rrggbb"), "{err}");
+        }
     }
 
     #[test]
