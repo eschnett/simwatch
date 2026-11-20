@@ -39,7 +39,7 @@ displayed generically instead of being rejected.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `name` | string | Simulation name. Without it SimWatch shows the directory name. |
+| `name` | string | Simulation name. Without it SimWatch shows the directory name. Keep it short, about 30 characters at most: the list gives the name the width the other columns leave, and cuts a longer one off with `…`. Leave out what other keys say, such as `group`, `code` or `host`. |
 | `status` | string | `queued`, `starting`, `running`, `stopped`, `finished`, `failed`, `cancelled` (see below) |
 | `updated` | time | When this file was written. Without it, the file's modification time is used. |
 | `started` | time | When the simulation (or the current job) started |
@@ -387,8 +387,9 @@ of `src/` can still include it there, since it needs nothing else.
    the status file. In MPI codes, compute collective diagnostics on all
    ranks as usual, and let only rank 0 write (the Julia writer's `active`
    does this).
-4. **Fill in what is already known.** At least `name`, `status`, `updated`,
-   `update_interval`. Then `[progress]` (`iteration`, `time`, `time_end`,
+4. **Fill in what is already known.** At least `name` (short: about 30
+   characters at most, without the `group`, which has a column of its own),
+   `status`, `updated`, `update_interval`. Then `[progress]` (`iteration`, `time`, `time_end`,
    `time_unit`, or `fraction`; `walltime`), `[slurm] job_id` from
    `$SLURM_JOB_ID` and `cluster` from `$SLURM_CLUSTER_NAME`, and
    `[resources]`. Add the diagnostics the code already
